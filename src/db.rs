@@ -39,6 +39,7 @@ impl<'a> iter::Iterator for Rows<'a> {
 pub struct CacheDB(sqlite::Connection);
 
 impl CacheDB {
+    /// Create a cache database in the given file.
     pub fn new<P: AsRef<path::Path>>(path: P)
         -> Result<CacheDB, Box<error::Error>>
     {
@@ -51,6 +52,7 @@ impl CacheDB {
             &[],
         )?.collect();
         if let sqlite::Value::Integer(0) = rows[0][0] {
+            // No tables define in this DB, let's load our schema.
             res.0.execute(SCHEMA_SQL)?
         }
 
