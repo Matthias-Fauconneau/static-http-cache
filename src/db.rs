@@ -16,9 +16,6 @@ const SCHEMA_SQL: &str = "
 ";
 
 
-const SETUP_SQL: &str = "
-    PRAGMA foreign_keys = ON;
-";
 
 
 /// Represents the rows returned by a query.
@@ -40,10 +37,9 @@ impl CacheDB {
     pub fn new<P: AsRef<path::Path>>(path: P)
         -> Result<CacheDB, Box<error::Error>>
     {
-        let conn = sqlite::Connection::open(path)?;
-        conn.execute(SETUP_SQL)?;
-
-        let res = CacheDB(conn);
+        // Package up the return value first, so we can use .query()
+        // instead of wrangling sqlite directly.
+        let res = CacheDB(sqlite::Connection::open(path)?);
 
         let rows: Vec<_> = res.query(
             "SELECT COUNT(*) FROM sqlite_master;",
