@@ -109,4 +109,11 @@ mod tests {
         ).unwrap().collect();
         assert_eq!(rows, vec![vec![sqlite::Value::String("urls".into())]]);
     }
+
+    #[test]
+    fn open_bogus_db() {
+        let res = super::CacheDB::new("does/not/exist");
+
+        assert_eq!(res.is_err(), true);
+    }
 }
