@@ -26,7 +26,12 @@ impl<'a> iter::Iterator for Rows<'a> {
     type Item = Vec<sqlite::Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().unwrap().map(|values| values.to_vec())
+        self.0.next()
+            .unwrap_or_else(|err| {
+                warn!("Failed to get next row from SQLite: {}", err);
+                None
+            })
+            .map(|values| values.to_vec())
     }
 }
 

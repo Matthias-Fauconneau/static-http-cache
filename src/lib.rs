@@ -2,6 +2,7 @@
 //!
 //! Ain't that great?
 extern crate crypto_hash;
+#[macro_use]
 extern crate log;
 extern crate reqwest;
 extern crate sqlite;
