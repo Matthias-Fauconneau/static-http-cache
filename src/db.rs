@@ -8,7 +8,6 @@ use sqlite;
 
 const SCHEMA_SQL: &str = "
     CREATE TABLE urls (
-    	id INTEGER PRIMARY KEY,
     	url TEXT NOT NULL UNIQUE,
     	path TEXT NOT NULL,
     	last_modified TEXT,
