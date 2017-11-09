@@ -3,6 +3,7 @@ use std::iter;
 use std::path;
 
 
+use reqwest;
 use sqlite;
 
 
@@ -16,6 +17,16 @@ const SCHEMA_SQL: &str = "
 ";
 
 
+/// All the information we have about a given URL.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CacheRecord {
+    /// The path to the cached response body on disk.
+    pub path: path::PathBuf,
+    /// The value of the Last-Modified header in the original response.
+    pub last_modified: Option<reqwest::header::HttpDate>,
+    /// The value of the Etag header in the original response.
+    pub etag: Option<String>,
+}
 
 
 /// Represents the rows returned by a query.
@@ -69,13 +80,70 @@ impl CacheDB {
 
         Ok(Rows(cur))
     }
+
+    pub fn get(&self, url: reqwest::Url)
+        -> Result<CacheRecord, Box<error::Error>>
+    {
+        let mut rows = self.query("
+            SELECT path, last_modified, etag
+            FROM urls
+            WHERE url = ?1
+            ",
+            &[sqlite::Value::String(url.as_str().into())],
+        )?;
+
+        rows.next()
+            .map_or(
+                Err(format!("URL not found in cache: {:?}", url)),
+                |x| Ok(x),
+            )
+            .map(|row| -> Result<CacheRecord, Box<error::Error>> {
+                let mut cols = row.into_iter();
+
+                let path = match cols.next().unwrap() {
+                    sqlite::Value::String(s) => Ok(path::PathBuf::from(s)),
+                    other => Err(format!("Path had wrong type: {:?}", other)),
+                }?;
+
+                let last_modified = match cols.next().unwrap() {
+                    sqlite::Value::String(s) => {
+                        use std::str::FromStr;
+                        Some(reqwest::header::HttpDate::from_str(&s)?)
+                    },
+                    sqlite::Value::Null => { None },
+                    other => {
+                        warn!(
+                            "last_modified contained weird type: {:?}",
+                            other,
+                        );
+                        None
+                    },
+                };
+
+                let etag = match cols.next().unwrap() {
+                    sqlite::Value::String(s) => { Some(s) },
+                    sqlite::Value::Null => { None },
+                    other => {
+                        warn!(
+                            "last_modified contained weird type: {:?}",
+                            other,
+                        );
+                        None
+                    },
+                };
+
+                Ok(CacheRecord{path, last_modified, etag})
+            })?
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
     extern crate tempdir;
+    use reqwest;
     use sqlite;
+    use std::path;
 
     #[test]
     fn create_fresh_db() {
@@ -116,5 +184,182 @@ mod tests {
         let res = super::CacheDB::new("does/not/exist");
 
         assert_eq!(res.is_err(), true);
+    }
+
+    #[test]
+    fn get_from_empty_db() {
+        let db = super::CacheDB::new(":memory:").unwrap();
+
+        let err = db.get("http://example.com/".parse().unwrap()).unwrap_err();
+
+        assert_eq!(
+            err.description(),
+            "URL not found in cache: \"http://example.com/\""
+        );
+    }
+
+    #[test]
+    fn get_unknown_url() {
+        let db = super::CacheDB::new(":memory:").unwrap();
+
+        db.0.execute("
+            INSERT INTO urls
+                ( url
+                , path
+                , last_modified
+                , etag
+                )
+            VALUES
+                ( 'http://example.com/one'
+                , 'path/to/data'
+                , NULL
+                , NULL
+                )
+            ;
+        ").unwrap();
+
+        let err = db.get(
+            "http://example.com/two".parse().unwrap()
+        ).unwrap_err();
+
+        assert_eq!(
+            err.description(),
+            "URL not found in cache: \"http://example.com/two\""
+        );
+    }
+
+    #[test]
+    fn get_known_url() {
+        let db = super::CacheDB::new(":memory:").unwrap();
+
+        db.0.execute("
+            INSERT INTO urls
+                ( url
+                , path
+                , last_modified
+                , etag
+                )
+            VALUES
+                ( 'http://example.com/'
+                , 'path/to/data'
+                , NULL
+                , NULL
+                )
+            ;
+        ").unwrap();
+
+        let record = db.get(
+            "http://example.com/".parse().unwrap()
+        ).unwrap();
+
+        assert_eq!(
+            record,
+            super::CacheRecord{
+                path: path::PathBuf::from("path/to/data"),
+                last_modified: None,
+                etag: None,
+            }
+        );
+    }
+
+    #[test]
+    fn get_known_url_with_headers() {
+        use std::str::FromStr;
+
+        let db = super::CacheDB::new(":memory:").unwrap();
+        db.0.execute("
+            INSERT INTO urls
+                ( url
+                , path
+                , last_modified
+                , etag
+                )
+            VALUES
+                ( 'http://example.com/'
+                , 'path/to/data'
+                , 'Thu, 01 Jan 1970 00:00:00 GMT'
+                , 'some-crazy-text'
+                )
+            ;
+        ").unwrap();
+
+        let record = db.get(
+            "http://example.com/".parse().unwrap()
+        ).unwrap();
+
+        assert_eq!(
+            record,
+            super::CacheRecord{
+                path: path::PathBuf::from("path/to/data"),
+                last_modified: Some(reqwest::header::HttpDate::from_str(
+                    "Thu, 01 Jan 1970 00:00:00 GMT"
+                ).unwrap()),
+                etag: Some("some-crazy-text".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn get_url_with_invalid_path() {
+
+        let db = super::CacheDB::new(":memory:").unwrap();
+
+        db.0.execute("
+            INSERT INTO urls
+                ( url
+                , path
+                , last_modified
+                , etag
+                )
+            VALUES
+                ( 'http://example.com/'
+                , CAST('abc' AS BLOB)
+                , NULL
+                , NULL
+                )
+            ;
+        ").unwrap();
+
+        let err = db.get("http://example.com/".parse().unwrap()).unwrap_err();
+
+        assert_eq!(
+            err.description(),
+            "Path had wrong type: Binary([97, 98, 99])"
+        );
+    }
+
+    #[test]
+    fn get_url_with_invalid_last_modified_and_etag() {
+
+        let db = super::CacheDB::new(":memory:").unwrap();
+
+        db.0.execute("
+            INSERT INTO urls
+                ( url
+                , path
+                , last_modified
+                , etag
+                )
+            VALUES
+                ( 'http://example.com/'
+                , 'path/to/data'
+                , CAST('abc' AS BLOB)
+                , CAST('def' AS BLOB)
+                )
+            ;
+        ").unwrap();
+
+        let record = db.get("http://example.com/".parse().unwrap()).unwrap();
+
+        assert_eq!(
+            record,
+            super::CacheRecord{
+                path: path::PathBuf::from("path/to/data"),
+                // We expect TEXT or NULL; if we get a BLOB value we
+                // treat it as NULL.
+                last_modified: None,
+                etag: None,
+            }
+        );
     }
 }
