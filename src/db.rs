@@ -81,9 +81,11 @@ impl CacheDB {
         Ok(Rows(cur))
     }
 
-    pub fn get(&self, url: reqwest::Url)
+    pub fn get(&self, mut url: reqwest::Url)
         -> Result<CacheRecord, Box<error::Error>>
     {
+        url.set_fragment(None);
+
         let mut rows = self.query("
             SELECT path, last_modified, etag
             FROM urls
@@ -357,6 +359,40 @@ mod tests {
                 path: path::PathBuf::from("path/to/data"),
                 // We expect TEXT or NULL; if we get a BLOB value we
                 // treat it as NULL.
+                last_modified: None,
+                etag: None,
+            }
+        );
+    }
+
+    #[test]
+    fn get_ignores_fragments() {
+        let db = super::CacheDB::new(":memory:").unwrap();
+
+        db.0.execute("
+            INSERT INTO urls
+                ( url
+                , path
+                , last_modified
+                , etag
+                )
+            VALUES
+                ( 'http://example.com/'
+                , 'path/to/data'
+                , NULL
+                , NULL
+                )
+            ;
+        ").unwrap();
+
+        let record = db.get(
+            "http://example.com/#top".parse().unwrap()
+        ).unwrap();
+
+        assert_eq!(
+            record,
+            super::CacheRecord{
+                path: path::PathBuf::from("path/to/data"),
                 last_modified: None,
                 etag: None,
             }
