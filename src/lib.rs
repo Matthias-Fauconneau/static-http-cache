@@ -152,8 +152,4 @@ mod tests {
             Ok(self.response.clone())
         }
     }
-
-    #[test]
-    fn it_works() {
-    }
 }
