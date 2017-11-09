@@ -102,7 +102,7 @@ mod tests {
         ).unwrap().collect();
         assert_eq!(rows, vec![vec![sqlite::Value::String("urls".into())]]);
 
-        
+
         let db2 = super::CacheDB::new(&db_path).unwrap();
         let rows: Vec<_> = db2.query(
             "SELECT name FROM sqlite_master WHERE TYPE = ?1",
