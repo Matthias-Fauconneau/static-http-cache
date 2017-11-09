@@ -79,8 +79,7 @@ mod tests {
 
     #[test]
     fn create_fresh_db() {
-        let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
-        let db = super::CacheDB::new(root.join("cache.db")).unwrap();
+        let db = super::CacheDB::new(":memory:").unwrap();
 
         let rows: Vec<_> = db.query(
             "SELECT name FROM sqlite_master WHERE TYPE = ?1",
