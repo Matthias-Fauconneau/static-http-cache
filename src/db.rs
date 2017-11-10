@@ -81,6 +81,7 @@ impl CacheDB {
         Ok(Rows(cur))
     }
 
+    /// Return what the DB knows about a URL, if anything.
     pub fn get(&self, mut url: reqwest::Url)
         -> Result<CacheRecord, Box<error::Error>>
     {
