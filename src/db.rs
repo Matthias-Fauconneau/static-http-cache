@@ -289,23 +289,16 @@ mod tests {
 
     #[test]
     fn get_unknown_url() {
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(":memory:").unwrap();
 
-        db.0.execute("
-            INSERT INTO urls
-                ( url
-                , path
-                , last_modified
-                , etag
-                )
-            VALUES
-                ( 'http://example.com/one'
-                , 'path/to/data'
-                , NULL
-                , NULL
-                )
-            ;
-        ").unwrap();
+        db.set(
+            "http://example.com/one".parse().unwrap(),
+            super::CacheRecord {
+                path: "path/to/data".into(),
+                last_modified: None,
+                etag: None,
+            },
+        ).unwrap().commit().unwrap();
 
         let err = db.get(
             "http://example.com/two".parse().unwrap()
@@ -319,73 +312,50 @@ mod tests {
 
     #[test]
     fn get_known_url() {
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(":memory:").unwrap();
 
-        db.0.execute("
-            INSERT INTO urls
-                ( url
-                , path
-                , last_modified
-                , etag
-                )
-            VALUES
-                ( 'http://example.com/'
-                , 'path/to/data'
-                , NULL
-                , NULL
-                )
-            ;
-        ").unwrap();
+        let orig_record = super::CacheRecord {
+            path: "path/to/data".into(),
+            last_modified: None,
+            etag: None,
+        };
 
-        let record = db.get(
+        db.set(
+            "http://example.com/".parse().unwrap(),
+            orig_record.clone(),
+        ).unwrap().commit().unwrap();
+
+        let new_record = db.get(
             "http://example.com/".parse().unwrap()
         ).unwrap();
 
-        assert_eq!(
-            record,
-            super::CacheRecord{
-                path: "path/to/data".into(),
-                last_modified: None,
-                etag: None,
-            }
-        );
+        assert_eq!(new_record, orig_record);
     }
 
     #[test]
     fn get_known_url_with_headers() {
         use std::str::FromStr;
 
-        let db = super::CacheDB::new(":memory:").unwrap();
-        db.0.execute("
-            INSERT INTO urls
-                ( url
-                , path
-                , last_modified
-                , etag
-                )
-            VALUES
-                ( 'http://example.com/'
-                , 'path/to/data'
-                , 'Thu, 01 Jan 1970 00:00:00 GMT'
-                , 'some-crazy-text'
-                )
-            ;
-        ").unwrap();
+        let mut db = super::CacheDB::new(":memory:").unwrap();
 
-        let record = db.get(
+        let orig_record = super::CacheRecord {
+            path: "path/to/data".into(),
+            last_modified: Some(reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:00:00 GMT"
+            ).unwrap()),
+            etag: Some("some-crazy-text".into()),
+        };
+
+        db.set(
+            "http://example.com/".parse().unwrap(),
+            orig_record.clone(),
+        ).unwrap().commit().unwrap();
+
+        let new_record = db.get(
             "http://example.com/".parse().unwrap()
         ).unwrap();
 
-        assert_eq!(
-            record,
-            super::CacheRecord{
-                path: "path/to/data".into(),
-                last_modified: Some(reqwest::header::HttpDate::from_str(
-                    "Thu, 01 Jan 1970 00:00:00 GMT"
-                ).unwrap()),
-                etag: Some("some-crazy-text".into()),
-            }
-        );
+        assert_eq!(new_record, orig_record);
     }
 
     #[test]
@@ -454,36 +424,24 @@ mod tests {
 
     #[test]
     fn get_ignores_fragments() {
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(":memory:").unwrap();
 
-        db.0.execute("
-            INSERT INTO urls
-                ( url
-                , path
-                , last_modified
-                , etag
-                )
-            VALUES
-                ( 'http://example.com/'
-                , 'path/to/data'
-                , NULL
-                , NULL
-                )
-            ;
-        ").unwrap();
+        let orig_record = super::CacheRecord {
+            path: "path/to/data".into(),
+            last_modified: None,
+            etag: None,
+        };
 
-        let record = db.get(
+        db.set(
+            "http://example.com/".parse().unwrap(),
+            orig_record.clone(),
+        ).unwrap().commit().unwrap();
+
+        let new_record = db.get(
             "http://example.com/#top".parse().unwrap()
         ).unwrap();
 
-        assert_eq!(
-            record,
-            super::CacheRecord{
-                path: "path/to/data".into(),
-                last_modified: None,
-                etag: None,
-            }
-        );
+        assert_eq!(new_record, orig_record);
     }
 
     #[test]
