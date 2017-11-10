@@ -21,7 +21,7 @@ const SCHEMA_SQL: &str = "
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CacheRecord {
     /// The path to the cached response body on disk.
-    pub path: path::PathBuf,
+    pub path: String,
     /// The value of the Last-Modified header in the original response.
     pub last_modified: Option<reqwest::header::HttpDate>,
     /// The value of the Etag header in the original response.
@@ -103,7 +103,7 @@ impl CacheDB {
                 let mut cols = row.into_iter();
 
                 let path = match cols.next().unwrap() {
-                    sqlite::Value::String(s) => Ok(path::PathBuf::from(s)),
+                    sqlite::Value::String(s) => Ok(s),
                     other => Err(format!("Path had wrong type: {:?}", other)),
                 }?;
 
@@ -145,7 +145,6 @@ mod tests {
     extern crate tempdir;
     use reqwest;
     use sqlite;
-    use std::path;
 
     #[test]
     fn create_fresh_db() {
@@ -257,7 +256,7 @@ mod tests {
         assert_eq!(
             record,
             super::CacheRecord{
-                path: path::PathBuf::from("path/to/data"),
+                path: "path/to/data".into(),
                 last_modified: None,
                 etag: None,
             }
@@ -292,7 +291,7 @@ mod tests {
         assert_eq!(
             record,
             super::CacheRecord{
-                path: path::PathBuf::from("path/to/data"),
+                path: "path/to/data".into(),
                 last_modified: Some(reqwest::header::HttpDate::from_str(
                     "Thu, 01 Jan 1970 00:00:00 GMT"
                 ).unwrap()),
@@ -356,7 +355,7 @@ mod tests {
         assert_eq!(
             record,
             super::CacheRecord{
-                path: path::PathBuf::from("path/to/data"),
+                path: "path/to/data".into(),
                 // We expect TEXT or NULL; if we get a BLOB value we
                 // treat it as NULL.
                 last_modified: None,
@@ -392,7 +391,7 @@ mod tests {
         assert_eq!(
             record,
             super::CacheRecord{
-                path: path::PathBuf::from("path/to/data"),
+                path: "path/to/data".into(),
                 last_modified: None,
                 etag: None,
             }
