@@ -46,6 +46,54 @@ impl<'a> iter::Iterator for Rows<'a> {
     }
 }
 
+
+/// Represents an attempt to record information in the database.
+#[must_use]
+pub struct Transaction<'a> {
+    conn: &'a sqlite::Connection,
+    committed: bool,
+}
+
+impl<'a> Transaction<'a> {
+    fn new(conn: &'a sqlite::Connection) -> Transaction<'a> {
+        Transaction{conn: conn, committed: false}
+    }
+
+    fn commit(mut self) -> Result<(), Box<error::Error>> {
+        println!("Attempting to commit changes...");
+        self.committed = true;
+
+        self.conn.execute("COMMIT;").map_err(|err| {
+            println!("Failed to commit changes: {}", err);
+            match self.conn.execute("ROLLBACK;") {
+                // Rollback worked, return the original error
+                Ok(_) => err,
+                // Rollback failed too! Let's warn about that,
+                // but return the original error.
+                Err(new_err) => {
+                    println!("Failed to rollback too! {}", new_err);
+                    err
+                },
+            }
+        })?;
+        println!("Commit successful!");
+        Ok(())
+    }
+}
+
+impl<'a> Drop for Transaction<'a> {
+    fn drop(&mut self) {
+        if self.committed {
+            println!("Changes already committed, nothing to do.")
+        } else {
+            println!("Attempting to rollback changes...");
+            self.conn.execute("ROLLBACK;").unwrap_or_else(|err| {
+                println!("Failed to rollback changes: {}", err)
+            })
+        }
+    }
+}
+
 /// Represents the database that describes the contents of the cache.
 pub struct CacheDB(sqlite::Connection);
 
@@ -137,6 +185,45 @@ impl CacheDB {
 
                 Ok(CacheRecord{path, last_modified, etag})
             })?
+    }
+
+    /// Record information about this information in the database.
+    pub fn set(&mut self, mut url: reqwest::Url, record: CacheRecord)
+        -> Result<Transaction, Box<error::Error>>
+    {
+        url.set_fragment(None);
+
+        // Start a new transaction...
+        self.0.execute("BEGIN;")?;
+
+        // ...and immediately construct the value that will clean up
+        // the transaction when necessary.
+        let res = Transaction::new(&self.0);
+
+        let rows = self.query("
+            INSERT OR REPLACE INTO urls
+                (url, path, last_modified, etag)
+            VALUES
+                (?1, ?2, ?3, ?4);
+            ",
+            &[
+                sqlite::Value::String(url.as_str().into()),
+                sqlite::Value::String(record.path),
+                record.last_modified
+                    .map(|date| {
+                        sqlite::Value::String(format!("{}", date))
+                    })
+                    .unwrap_or(sqlite::Value::Null),
+                record.etag
+                    .map(|etag| { sqlite::Value::String(etag) })
+                    .unwrap_or(sqlite::Value::Null),
+            ],
+        )?;
+
+        // Exhaust the row iterator to ensure the query is executed.
+        for _ in rows {};
+
+        Ok(res)
     }
 }
 
@@ -398,4 +485,182 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn insert_data_with_commit() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+        let record = super::CacheRecord{
+            path: "path/to/data".into(),
+            last_modified: None,
+            etag: None,
+        };
+
+        let mut db = super::CacheDB::new(":memory:").unwrap();
+
+        // Add data into the DB, inside a block so we can be sure all the
+        //  intermediates have been dropped afterward.
+        {
+            let trans = db.set(url.clone(), record.clone()).unwrap();
+
+            trans.commit().unwrap();
+        }
+
+        let rows: Vec<_> = db.query(
+            "SELECT * FROM urls;",
+            &[],
+        ).unwrap().collect();
+        println!("Table content: {:?}", rows);
+
+        // Did our data make it into the DB?
+        assert_eq!(db.get(url).unwrap(), record);
+    }
+
+    #[test]
+    fn insert_data_with_all_fields() {
+        use std::str::FromStr;
+
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+        let record = super::CacheRecord{
+            path: "path/to/data".into(),
+            last_modified: Some(reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:00:00 GMT"
+            ).unwrap()),
+            etag: Some("some-crazy-text".into()),
+        };
+
+        let mut db = super::CacheDB::new(":memory:").unwrap();
+
+        // Add data into the DB, inside a block so we can be sure all the
+        //  intermediates have been dropped afterward.
+        db.set(url.clone(), record.clone()).unwrap().commit().unwrap();
+
+        // Did our data make it into the DB?
+        assert_eq!(db.get(url).unwrap(), record);
+    }
+
+    #[test]
+    fn insert_data_without_commit() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+        let record = super::CacheRecord{
+            path: "path/to/data".into(),
+            last_modified: None,
+            etag: None,
+        };
+
+        let mut db = super::CacheDB::new(":memory:").unwrap();
+
+        // Add data into the DB, inside a block so we can be sure all the
+        //  intermediates have been dropped afterward.
+        {
+            let _ = db.set(url.clone(), record.clone()).unwrap();
+
+            // Don't commit before the end of the block!
+        }
+
+        // Did our data make it into the DB?
+        assert_eq!(
+            db.get(url).unwrap_err().description(),
+            "URL not found in cache: \"http://example.com/\""
+        );
+    }
+
+    #[test]
+    fn overwrite_data() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+
+        let record_one = super::CacheRecord{
+            path: "path/to/data/one".into(),
+            last_modified: None,
+            etag: Some("one".into()),
+        };
+
+        let record_two = super::CacheRecord{
+            path: "path/to/data/two".into(),
+            last_modified: None,
+            etag: Some("two".into()),
+        };
+
+        let mut db = super::CacheDB::new(":memory:").unwrap();
+
+        // Our example URL just returned record one.
+        db.set(url.clone(), record_one.clone()).unwrap().commit().unwrap();
+
+        // We recorded that correctly, right?
+        assert_eq!(
+            db.get(url.clone()).unwrap(),
+            record_one
+        );
+
+        // Oh, the URL got updated!
+        db.set(url.clone(), record_two.clone()).unwrap().commit().unwrap();
+
+        // We recorded that correctly too, right?
+        assert_eq!(
+            db.get(url.clone()).unwrap(),
+            record_two
+        );
+    }
+
+    #[test]
+    fn insert_data_ignores_url_fragment() {
+        let record_one = super::CacheRecord{
+            path: "path/to/data/one".into(),
+            last_modified: None,
+            etag: Some("one".into()),
+        };
+
+        let record_two = super::CacheRecord{
+            path: "path/to/data/two".into(),
+            last_modified: None,
+            etag: Some("two".into()),
+        };
+
+        let mut db = super::CacheDB::new(":memory:").unwrap();
+
+        // Try to insert data with a fragment
+        db.set(
+            "http://example.com/#frag".parse().unwrap(),
+            record_one.clone(),
+        ).unwrap().commit().unwrap();
+
+        // Try to insert different data without a fragment
+        db.set(
+            "http://example.com/".parse().unwrap(),
+            record_two.clone(),
+        ).unwrap().commit().unwrap();
+
+        // Querying with any fragment, or without a fragment, will always
+        // give us the same information.
+        assert_eq!(
+            db.get("http://example.com/#frag".parse().unwrap()).unwrap(),
+            record_two
+        );
+        assert_eq!(
+            db.get("http://example.com/#garf".parse().unwrap()).unwrap(),
+            record_two
+        );
+        assert_eq!(
+            db.get("http://example.com/".parse().unwrap()).unwrap(),
+            record_two
+        );
+
+        // If we insert data with a fragment, the new data is returned for
+        // all queries.
+        db.set(
+            "http://example.com/#boop".parse().unwrap(),
+            record_one.clone(),
+        ).unwrap().commit().unwrap();
+
+        assert_eq!(
+            db.get("http://example.com/#frag".parse().unwrap()).unwrap(),
+            record_one
+        );
+        assert_eq!(
+            db.get("http://example.com/#garf".parse().unwrap()).unwrap(),
+            record_one
+        );
+        assert_eq!(
+            db.get("http://example.com/".parse().unwrap()).unwrap(),
+            record_one
+        );    }
 }
