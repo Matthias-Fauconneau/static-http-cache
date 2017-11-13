@@ -59,7 +59,7 @@ impl<'a> Transaction<'a> {
         Transaction{conn: conn, committed: false}
     }
 
-    fn commit(mut self) -> Result<(), Box<error::Error>> {
+    pub fn commit(mut self) -> Result<(), Box<error::Error>> {
         println!("Attempting to commit changes...");
         self.committed = true;
 

@@ -6,10 +6,12 @@ extern crate crypto_hash;
 extern crate log;
 extern crate reqwest;
 extern crate sqlite;
+extern crate rand;
 
 
 use std::error;
 use std::fs;
+use std::io;
 use std::path;
 
 
@@ -17,6 +19,38 @@ pub mod reqwest_mock;
 
 
 mod db;
+
+
+fn make_random_file<P: AsRef<path::Path>>(parent: P)
+    -> Result<(fs::File, path::PathBuf), Box<error::Error>>
+{
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    loop {
+        let new_path = parent
+            .as_ref()
+            .join(rng.gen_ascii_chars().take(20).collect::<String>());
+
+        let maybe_handle = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&new_path);
+
+        match maybe_handle {
+            Ok(handle) => { return Ok((handle, new_path)) },
+            Err(e) => {
+                if e.kind() != io::ErrorKind::AlreadyExists {
+                    // An actual error, we'd better report it!
+                    return Err(e.into())
+                }
+
+                // Otherwise, we'll just continue around the loop and
+                // try again.
+            },
+        };
+    }
+}
 
 
 /// Represents a local cache of HTTP bodies.
@@ -33,6 +67,13 @@ pub struct Cache<C: reqwest_mock::Client> {
 
 
 impl<C: reqwest_mock::Client> Cache<C> {
+
+    /// Returns a Cache that wraps `client` and caches data in `root`.
+    ///
+    /// If the directory `root` does not exist, it will be created.
+    /// If it does exist, previously cached data will be available.
+    ///
+    /// The client should almost certainly be a `reqwest::Client`.
     pub fn new(root: path::PathBuf, client: C)
         -> Result<Cache<C>, Box<error::Error>>
     {
@@ -43,6 +84,81 @@ impl<C: reqwest_mock::Client> Cache<C> {
         let db = db::CacheDB::new(root.join("cache.db"))?;
 
         Ok(Cache { root, db, client })
+    }
+
+    pub fn get(&mut self, mut url: reqwest::Url)
+        -> Result<fs::File, Box<error::Error>>
+    {
+        use reqwest_mock::HttpResponse;
+
+        url.set_fragment(None);
+
+        let mut response = match self.db.get(url.clone()) {
+            Ok(db::CacheRecord{path: p, last_modified: lm, etag: et}) => {
+                // We have a locally-cached copy, let's check whether the
+                // copy on the server has changed.
+                let mut request = reqwest::Request::new(
+                    reqwest::Method::Get,
+                    url.clone(),
+                );
+                if let Some(timestamp) = lm {
+                    request.headers_mut().set(
+                        reqwest::header::IfModifiedSince(timestamp),
+                    );
+                }
+
+                let response = self.client
+                    .execute(request)?
+                    .error_for_status()?;
+
+                // If our existing cached data is still fresh...
+                if response.status() == reqwest::StatusCode::NotModified {
+                    // ... let's use it as is.
+                    return Ok(fs::File::open(self.root.join(p))?);
+                }
+
+                // Otherwise, we got a new response we need to cache.
+                response
+            },
+            Err(_) => {
+                // This URL isn't in the cache, or we otherwise can't find it.
+                self.client.execute(
+                    reqwest::Request::new(reqwest::Method::Get, url.clone()),
+                )?.error_for_status()?
+            },
+        };
+
+        let content_dir = self.root.join("content");
+        fs::DirBuilder::new()
+            .recursive(true)
+            .create(&content_dir)?;
+
+        let (mut handle, path) = make_random_file(&content_dir)?;
+        let rel_path = path.strip_prefix(&self.root)?;
+
+        let trans = self.db.set(
+            url,
+            db::CacheRecord {
+                path: rel_path.to_str().unwrap().into(),
+                last_modified: response.headers()
+                    .get::<reqwest::header::LastModified>()
+                    .map(|&reqwest::header::LastModified(date)| {
+                        date
+                    }),
+                etag: None,
+            },
+        )?;
+
+        let count = io::copy(
+            &mut response,
+            &mut handle,
+        )?;
+
+        debug!("Downloaded {} bytes", count);
+
+        trans.commit()?;
+
+        Ok(fs::File::open(&path)?)
     }
 }
 
@@ -91,8 +207,11 @@ mod tests {
 
     impl super::reqwest_mock::HttpResponse for FakeResponse {
         fn headers(&self) -> &reqwest::header::Headers { &self.headers }
+        fn status(&self) -> reqwest::StatusCode { self.status }
         fn error_for_status(self) -> Result<Self, Box<Error>> {
-            if self.status.is_success() {
+            if !self.status.is_client_error()
+                && !self.status.is_server_error()
+            {
                 Ok(self)
             } else {
                 Err(Box::new(FakeError))
@@ -152,4 +271,156 @@ mod tests {
             Ok(self.response.clone())
         }
     }
+
+
+    fn make_test_cache(client: FakeClient) -> super::Cache<FakeClient> {
+        super::Cache::new(
+            tempdir::TempDir::new("http-cache-test").unwrap().into_path(),
+            client,
+        ).unwrap()
+    }
+
+
+    #[test]
+    fn initial_request_success() {
+        let url_text = "http://example.com/";
+        let url: reqwest::Url = url_text.parse().unwrap();
+
+        let body = b"hello world";
+
+        let mut c = make_test_cache(
+            FakeClient::new(
+                url.clone(),
+                reqwest::header::Headers::default(),
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: reqwest::header::Headers::default(),
+                    body: io::Cursor::new(body.as_ref().into()),
+                }
+            ),
+        );
+
+        // We should get a file-handle containing the body bytes.
+        let mut res = c.get(url).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, body);
+        c.client.assert_called();
+    }
+
+    #[test]
+    fn initial_request_failure() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+        let mut c = make_test_cache(
+            FakeClient::new(
+                url.clone(),
+                reqwest::header::Headers::default(),
+                FakeResponse{
+                    status: reqwest::StatusCode::InternalServerError,
+                    headers: reqwest::header::Headers::default(),
+                    body: io::Cursor::new(vec![]),
+                }
+            ),
+        );
+
+        let err = c.get(url).expect_err("Got a response??");
+        assert_eq!(format!("{}", err), "FakeError");
+        c.client.assert_called();
+    }
+
+    #[test]
+    fn ignore_fragment_in_url() {
+        let url_fragment: reqwest::Url = "http://example.com/#frag"
+            .parse()
+            .unwrap();
+
+        let mut network_url = url_fragment.clone();
+        network_url.set_fragment(None);
+
+        let mut c = make_test_cache(
+            FakeClient::new(
+                // We expect the cache to request the URL without the fragment.
+                network_url,
+                reqwest::header::Headers::default(),
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: reqwest::header::Headers::default(),
+                    body: io::Cursor::new(b"hello world"[..].into()),
+                }
+            ),
+        );
+
+        // Ask for the URL with the fragment.
+        c.get(url_fragment).unwrap();
+    }
+
+    #[test]
+    fn use_cache_data_if_not_modified_since() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+        let body = b"hello world";
+
+        let now = ::std::time::SystemTime::now();
+
+        // We send a request, and the server responds with the data,
+        // and a "Last-Modified" header.
+        let mut response_headers = reqwest::header::Headers::default();
+        response_headers.set(reqwest::header::LastModified(now.into()));
+
+        let mut c = make_test_cache(
+            FakeClient::new(
+                url.clone(),
+                reqwest::header::Headers::default(),
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: response_headers.clone(),
+                    body: io::Cursor::new(body.as_ref().into()),
+                }
+            ),
+        );
+
+        // The response and its last-modified date should now be recorded
+        // in the cache.
+        c.get(url.clone()).unwrap();
+        c.client.assert_called();
+
+        // For the next request, we expect the request to include the
+        // modified date in the "if modified since" header, and we'll give
+        // the "no, it hasn't been modified" response.
+        let mut second_request = reqwest::header::Headers::default();
+        second_request.set(reqwest::header::IfModifiedSince(now.into()));
+
+        c.client = FakeClient::new(
+            url.clone(),
+            second_request,
+            FakeResponse{
+                status: reqwest::StatusCode::NotModified,
+                headers: response_headers,
+                body: io::Cursor::new(b""[..].into()),
+            },
+        );
+
+        // Now when we make the request, even though the actual response
+        // did not include a body, we should get the complete body from
+        // the local cache.
+        let mut res = c.get(url).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, body);
+        c.client.assert_called();
+    }
+
+
+    // Things to test:
+    // - if the response has a "last-modified" header, record it in the cache.
+    //   - a subsequent request should send "if-modified-since".
+    //   - subsequent response 200 should download to "body.part" then rename.
+    //   - subsequent response 304 should just open the existing file.
+    //   - error responses should leave the existing file alone.
+    // - if the response has an "etag" header, record it in the cache.
+    //   - a subsequent request should send "if-none-match".
+    //   - subsequent response 200 should download to "body.part" then rename.
+    //   - subsequent response 304 should just open the existing file.
+    //   - error responses should leave the existing file alone.
+    //
+    // See also: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching
 }

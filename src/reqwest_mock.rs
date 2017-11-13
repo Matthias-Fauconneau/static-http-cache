@@ -15,6 +15,9 @@ pub trait HttpResponse: io::Read
     /// Obtain access to the headers of the response.
     fn headers(&self) -> &reqwest::header::Headers;
 
+    /// Obtain a copy of the response's status.
+    fn status(&self) -> reqwest::StatusCode;
+
     /// Return an error if the response's status is in the range 400-599.
     fn error_for_status(self) -> Result<Self, Box<error::Error>>;
 }
@@ -22,6 +25,7 @@ pub trait HttpResponse: io::Read
 
 impl HttpResponse for reqwest::Response {
     fn headers(&self) -> &reqwest::header::Headers { self.headers() }
+    fn status(&self) -> reqwest::StatusCode { self.status() }
     fn error_for_status(self) -> Result<Self, Box<error::Error>> {
         Ok(self.error_for_status()?)
     }
