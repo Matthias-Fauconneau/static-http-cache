@@ -193,6 +193,10 @@ impl CacheDB {
     {
         url.set_fragment(None);
 
+        // TODO: Consider using the "pre-poop-your-pants" pattern to
+        // ensure the transaction gets cleaned up even if somebody calls
+        // mem::forget() on the Transaction object.
+
         // Start a new transaction...
         self.0.execute("BEGIN;")?;
 
