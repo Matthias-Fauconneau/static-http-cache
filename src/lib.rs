@@ -409,10 +409,106 @@ mod tests {
         c.client.assert_called();
     }
 
+    #[test]
+    fn update_cache_if_modified_since() {
+        use std::str::FromStr;
+
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+
+        // We send a request, and the server responds with the data,
+        // and a "Last-Modified" header.
+        let request_1_headers = reqwest::header::Headers::default();
+        let mut response_1_headers = reqwest::header::Headers::default();
+        response_1_headers.set(reqwest::header::LastModified(
+            reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:00:00 GMT"
+            ).unwrap(),
+        ));
+
+        let mut c = make_test_cache(
+            FakeClient::new(
+                url.clone(),
+                request_1_headers,
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: response_1_headers,
+                    body: io::Cursor::new(b"hello".as_ref().into()),
+                }
+            ),
+        );
+
+        // The response and its last-modified date should now be recorded
+        // in the cache.
+        c.get(url.clone()).unwrap();
+        c.client.assert_called();
+
+        // For the next request, we expect the request to include the
+        // modified date in the "if modified since" header, and we'll give
+        // the "yes, it has been modified" response with a new Last-Modified.
+        let mut request_2_headers = reqwest::header::Headers::default();
+        request_2_headers.set(reqwest::header::IfModifiedSince(
+            reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:00:00 GMT"
+            ).unwrap(),
+        ));
+        let mut response_2_headers = reqwest::header::Headers::default();
+        response_2_headers.set(reqwest::header::LastModified(
+            reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:01:00 GMT"
+            ).unwrap(),
+        ));
+
+        c.client = FakeClient::new(
+            url.clone(),
+            request_2_headers,
+            FakeResponse{
+                status: reqwest::StatusCode::Ok,
+                headers: response_2_headers,
+                body: io::Cursor::new(b"world".as_ref().into()),
+            },
+        );
+
+        // Now when we make the request, we should get the new body and
+        // ignore what's in the cache.
+        let mut res = c.get(url.clone()).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, b"world");
+        c.client.assert_called();
+
+        // If we make another request, we should set If-Modified-Since
+        // to match the second response, and be able to return the data from
+        // the second response.
+        let mut request_3_headers = reqwest::header::Headers::default();
+        request_3_headers.set(reqwest::header::IfModifiedSince(
+            reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:01:00 GMT"
+            ).unwrap(),
+        ));
+        let mut response_3_headers = reqwest::header::Headers::default();
+
+        c.client = FakeClient::new(
+            url.clone(),
+            request_3_headers,
+            FakeResponse{
+                status: reqwest::StatusCode::NotModified,
+                headers: response_3_headers,
+                body: io::Cursor::new(b"".as_ref().into()),
+            },
+        );
+
+        // Now when we make the request, we should get updated info from the
+        // cache.
+        let mut res = c.get(url).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, b"world");
+        c.client.assert_called();
+    }
+
 
     // Things to test:
     // - if the response has a "last-modified" header, record it in the cache.
-    //   - subsequent response 200 should download to "body.part" then rename.
     //   - error responses should leave the existing file alone.
     // - if the response has an "etag" header, record it in the cache.
     //   - a subsequent request should send "if-none-match".
