@@ -412,9 +412,7 @@ mod tests {
 
     // Things to test:
     // - if the response has a "last-modified" header, record it in the cache.
-    //   - a subsequent request should send "if-modified-since".
     //   - subsequent response 200 should download to "body.part" then rename.
-    //   - subsequent response 304 should just open the existing file.
     //   - error responses should leave the existing file alone.
     // - if the response has an "etag" header, record it in the cache.
     //   - a subsequent request should send "if-none-match".
