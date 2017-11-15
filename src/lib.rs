@@ -107,18 +107,28 @@ impl<C: reqwest_mock::Client> Cache<C> {
                     );
                 }
 
-                let response = self.client
-                    .execute(request)?
-                    .error_for_status()?;
+                let maybe_validation = self.client
+                    .execute(request)
+                    .and_then(|resp| { resp.error_for_status() });
 
-                // If our existing cached data is still fresh...
-                if response.status() == reqwest::StatusCode::NotModified {
-                    // ... let's use it as is.
-                    return Ok(fs::File::open(self.root.join(p))?);
+                match maybe_validation {
+                    Ok(new_response) => {
+                        // If our existing cached data is still fresh...
+                        if new_response.status() == reqwest::StatusCode::NotModified {
+                            // ... let's use it as is.
+                            return Ok(fs::File::open(self.root.join(p))?);
+                        }
+
+                        // Otherwise, we got a new response we need to cache.
+                        new_response
+                    },
+                    Err(e) => {
+                        warn!("Could not validate cached response: {}", e);
+
+                        // Let's just use the existing data we have.
+                        return Ok(fs::File::open(self.root.join(p))?);
+                    },
                 }
-
-                // Otherwise, we got a new response we need to cache.
-                response
             },
             Err(_) => {
                 // This URL isn't in the cache, or we otherwise can't find it.
@@ -269,6 +279,58 @@ mod tests {
             self.called.set(true);
 
             Ok(self.response.clone())
+        }
+    }
+
+
+    struct BrokenClient<F>
+        where F: Fn() -> Box<Error>
+    {
+        expected_url: reqwest::Url,
+        expected_headers: reqwest::header::Headers,
+        make_error: F,
+        called: cell::Cell<bool>,
+    }
+
+
+    impl<F> BrokenClient<F>
+        where F: Fn() -> Box<Error>
+    {
+        fn new(
+            expected_url: reqwest::Url,
+            expected_headers: reqwest::header::Headers,
+            make_error: F,
+        ) -> BrokenClient<F> {
+            let called = cell::Cell::new(false);
+            BrokenClient {
+                expected_url,
+                expected_headers,
+                make_error,
+                called,
+            }
+        }
+
+        fn assert_called(self) {
+            assert_eq!(self.called.get(), true);
+        }
+    }
+
+
+    impl<F> super::reqwest_mock::Client for BrokenClient<F>
+        where F: Fn() -> Box<Error>
+    {
+        type Response = FakeResponse;
+
+        fn execute(&self, request: reqwest::Request)
+            -> Result<Self::Response, Box<Error>>
+        {
+            assert_eq!(request.method(), &reqwest::Method::Get);
+            assert_eq!(request.url(), &self.expected_url);
+            assert_eq!(request.headers(), &self.expected_headers);
+
+            self.called.set(true);
+
+            Err((self.make_error)())
         }
     }
 
@@ -485,7 +547,7 @@ mod tests {
                 "Thu, 01 Jan 1970 00:01:00 GMT"
             ).unwrap(),
         ));
-        let mut response_3_headers = reqwest::header::Headers::default();
+        let response_3_headers = reqwest::header::Headers::default();
 
         c.client = FakeClient::new(
             url.clone(),
@@ -507,9 +569,73 @@ mod tests {
     }
 
 
+    #[test]
+    fn return_existing_data_on_connection_refused() {
+        use std::str::FromStr;
+
+        let temp_path = tempdir::TempDir::new("http-cache-test")
+            .unwrap()
+            .into_path();
+
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+
+        // We send a request, and the server responds with the data,
+        // and a "Last-Modified" header.
+        let request_1_headers = reqwest::header::Headers::default();
+        let mut response_1_headers = reqwest::header::Headers::default();
+        response_1_headers.set(reqwest::header::LastModified(
+            reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:00:00 GMT"
+            ).unwrap(),
+        ));
+
+        let mut c = super::Cache::new(
+            temp_path.clone(),
+            FakeClient::new(
+                url.clone(),
+                request_1_headers,
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: response_1_headers,
+                    body: io::Cursor::new(b"hello".as_ref().into()),
+                }
+            ),
+        ).unwrap();
+
+        // The response and its last-modified date should now be recorded
+        // in the cache.
+        c.get(url.clone()).unwrap();
+        c.client.assert_called();
+
+        // If we make second request, we should set If-Modified-Since
+        // to match the first response's Last-Modified.
+        let mut request_2_headers = reqwest::header::Headers::default();
+        request_2_headers.set(reqwest::header::IfModifiedSince(
+            reqwest::header::HttpDate::from_str(
+                "Thu, 01 Jan 1970 00:00:00 GMT"
+            ).unwrap(),
+        ));
+
+        // This time, however, the request will return an error.
+        let mut c = super::Cache::new(
+            temp_path.clone(),
+            BrokenClient::new(
+                url.clone(),
+                request_2_headers,
+                || { FakeError.into() },
+            ),
+        ).unwrap();
+
+        // Now when we request a URL, we should get the cached result.
+        let mut res = c.get(url.clone()).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, b"hello");
+        c.client.assert_called();
+    }
+
+
     // Things to test:
-    // - if the response has a "last-modified" header, record it in the cache.
-    //   - error responses should leave the existing file alone.
     // - if the response has an "etag" header, record it in the cache.
     //   - a subsequent request should send "if-none-match".
     //   - subsequent response 200 should download to "body.part" then rename.
