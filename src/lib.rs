@@ -90,6 +90,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
         -> Result<fs::File, Box<error::Error>>
     {
         use reqwest_mock::HttpResponse;
+        use reqwest::StatusCode;
 
         url.set_fragment(None);
 
@@ -114,7 +115,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
                 match maybe_validation {
                     Ok(new_response) => {
                         // If our existing cached data is still fresh...
-                        if new_response.status() == reqwest::StatusCode::NotModified {
+                        if new_response.status() == StatusCode::NotModified {
                             // ... let's use it as is.
                             return Ok(fs::File::open(self.root.join(p))?);
                         }
