@@ -43,12 +43,11 @@ fn make_random_file<P: AsRef<path::Path>>(parent: P)
             .as_ref()
             .join(rng.gen_ascii_chars().take(20).collect::<String>());
 
-        let maybe_handle = fs::OpenOptions::new()
+        match fs::OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(&new_path);
-
-        match maybe_handle {
+            .open(&new_path)
+        {
             Ok(handle) => { return Ok((handle, new_path)) },
             Err(e) => {
                 if e.kind() != io::ErrorKind::AlreadyExists {
@@ -56,8 +55,8 @@ fn make_random_file<P: AsRef<path::Path>>(parent: P)
                     return Err(e.into())
                 }
 
-                // Otherwise, we'll just continue around the loop and
-                // try again.
+                // Otherwise, we just picked a bad name. Let's go back
+                // around the loop and try again.
             },
         };
     }
