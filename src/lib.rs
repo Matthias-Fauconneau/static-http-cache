@@ -201,163 +201,16 @@ mod tests {
 
     use reqwest;
 
-    use std::cell;
-    use std::fmt;
     use std::io;
 
-    use std::error::Error;
     use std::io::Read;
 
-
-    #[derive(Debug, Eq, PartialEq, Hash)]
-    struct FakeError;
+    use super::reqwest_mock::tests as rmt;
 
 
-    impl fmt::Display for FakeError {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter)
-            -> Result<(), ::std::fmt::Error>
-        {
-            f.write_str("FakeError")?;
-            Ok(())
-        }
-    }
-
-
-    impl Error for FakeError {
-        fn description(&self) -> &str { "Something Ooo occurred" }
-        fn cause(&self) -> Option<&Error> { None }
-    }
-
-
-    #[derive(Clone)]
-    struct FakeResponse {
-        status: reqwest::StatusCode,
-        headers: reqwest::header::Headers,
-        body: io::Cursor<Vec<u8>>,
-    }
-
-
-    impl super::reqwest_mock::HttpResponse for FakeResponse {
-        fn headers(&self) -> &reqwest::header::Headers { &self.headers }
-        fn status(&self) -> reqwest::StatusCode { self.status }
-        fn error_for_status(self) -> Result<Self, Box<Error>> {
-            if !self.status.is_client_error()
-                && !self.status.is_server_error()
-            {
-                Ok(self)
-            } else {
-                Err(Box::new(FakeError))
-            }
-        }
-    }
-
-
-    impl Read for FakeResponse {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            self.body.read(buf)
-        }
-    }
-
-
-    struct FakeClient {
-        expected_url: reqwest::Url,
-        expected_headers: reqwest::header::Headers,
-        response: FakeResponse,
-        called: cell::Cell<bool>,
-    }
-
-
-    impl FakeClient {
-        fn new(
-            expected_url: reqwest::Url,
-            expected_headers: reqwest::header::Headers,
-            response: FakeResponse,
-        ) -> FakeClient {
-            let called = cell::Cell::new(false);
-            FakeClient {
-                expected_url,
-                expected_headers,
-                response,
-                called,
-            }
-        }
-
-        fn assert_called(self) {
-            assert_eq!(self.called.get(), true);
-        }
-    }
-
-
-    impl super::reqwest_mock::Client for FakeClient {
-        type Response = FakeResponse;
-
-        fn execute(&self, request: reqwest::Request)
-            -> Result<Self::Response, Box<Error>>
-        {
-            assert_eq!(request.method(), &reqwest::Method::Get);
-            assert_eq!(request.url(), &self.expected_url);
-            assert_eq!(request.headers(), &self.expected_headers);
-
-            self.called.set(true);
-
-            Ok(self.response.clone())
-        }
-    }
-
-
-    struct BrokenClient<F>
-        where F: Fn() -> Box<Error>
+    fn make_test_cache(client: rmt::FakeClient)
+        -> super::Cache<rmt::FakeClient>
     {
-        expected_url: reqwest::Url,
-        expected_headers: reqwest::header::Headers,
-        make_error: F,
-        called: cell::Cell<bool>,
-    }
-
-
-    impl<F> BrokenClient<F>
-        where F: Fn() -> Box<Error>
-    {
-        fn new(
-            expected_url: reqwest::Url,
-            expected_headers: reqwest::header::Headers,
-            make_error: F,
-        ) -> BrokenClient<F> {
-            let called = cell::Cell::new(false);
-            BrokenClient {
-                expected_url,
-                expected_headers,
-                make_error,
-                called,
-            }
-        }
-
-        fn assert_called(self) {
-            assert_eq!(self.called.get(), true);
-        }
-    }
-
-
-    impl<F> super::reqwest_mock::Client for BrokenClient<F>
-        where F: Fn() -> Box<Error>
-    {
-        type Response = FakeResponse;
-
-        fn execute(&self, request: reqwest::Request)
-            -> Result<Self::Response, Box<Error>>
-        {
-            assert_eq!(request.method(), &reqwest::Method::Get);
-            assert_eq!(request.url(), &self.expected_url);
-            assert_eq!(request.headers(), &self.expected_headers);
-
-            self.called.set(true);
-
-            Err((self.make_error)())
-        }
-    }
-
-
-    fn make_test_cache(client: FakeClient) -> super::Cache<FakeClient> {
         super::Cache::new(
             tempdir::TempDir::new("http-cache-test").unwrap().into_path(),
             client,
@@ -373,10 +226,10 @@ mod tests {
         let body = b"hello world";
 
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 reqwest::header::Headers::default(),
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: reqwest::header::Headers::default(),
                     body: io::Cursor::new(body.as_ref().into()),
@@ -396,10 +249,10 @@ mod tests {
     fn initial_request_failure() {
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 reqwest::header::Headers::default(),
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::InternalServerError,
                     headers: reqwest::header::Headers::default(),
                     body: io::Cursor::new(vec![]),
@@ -422,11 +275,11 @@ mod tests {
         network_url.set_fragment(None);
 
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 // We expect the cache to request the URL without the fragment.
                 network_url,
                 reqwest::header::Headers::default(),
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: reqwest::header::Headers::default(),
                     body: io::Cursor::new(b"hello world"[..].into()),
@@ -451,10 +304,10 @@ mod tests {
         response_headers.set(reqwest::header::LastModified(now.into()));
 
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 reqwest::header::Headers::default(),
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: response_headers.clone(),
                     body: io::Cursor::new(body.as_ref().into()),
@@ -473,10 +326,10 @@ mod tests {
         let mut second_request = reqwest::header::Headers::default();
         second_request.set(reqwest::header::IfModifiedSince(now.into()));
 
-        c.client = FakeClient::new(
+        c.client = rmt::FakeClient::new(
             url.clone(),
             second_request,
-            FakeResponse{
+            rmt::FakeResponse{
                 status: reqwest::StatusCode::NotModified,
                 headers: response_headers,
                 body: io::Cursor::new(b""[..].into()),
@@ -510,10 +363,10 @@ mod tests {
         ));
 
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 request_1_headers,
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: response_1_headers,
                     body: io::Cursor::new(b"hello".as_ref().into()),
@@ -542,10 +395,10 @@ mod tests {
             ).unwrap(),
         ));
 
-        c.client = FakeClient::new(
+        c.client = rmt::FakeClient::new(
             url.clone(),
             request_2_headers,
-            FakeResponse{
+            rmt::FakeResponse{
                 status: reqwest::StatusCode::Ok,
                 headers: response_2_headers,
                 body: io::Cursor::new(b"world".as_ref().into()),
@@ -571,10 +424,10 @@ mod tests {
         ));
         let response_3_headers = reqwest::header::Headers::default();
 
-        c.client = FakeClient::new(
+        c.client = rmt::FakeClient::new(
             url.clone(),
             request_3_headers,
-            FakeResponse{
+            rmt::FakeResponse{
                 status: reqwest::StatusCode::NotModified,
                 headers: response_3_headers,
                 body: io::Cursor::new(b"".as_ref().into()),
@@ -613,10 +466,10 @@ mod tests {
 
         let mut c = super::Cache::new(
             temp_path.clone(),
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 request_1_headers,
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: response_1_headers,
                     body: io::Cursor::new(b"hello".as_ref().into()),
@@ -641,10 +494,10 @@ mod tests {
         // This time, however, the request will return an error.
         let mut c = super::Cache::new(
             temp_path.clone(),
-            BrokenClient::new(
+            rmt::BrokenClient::new(
                 url.clone(),
                 request_2_headers,
-                || { FakeError.into() },
+                || { rmt::FakeError.into() },
             ),
         ).unwrap();
 
@@ -671,10 +524,10 @@ mod tests {
         );
 
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 reqwest::header::Headers::default(),
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: response_headers.clone(),
                     body: io::Cursor::new(body.as_ref().into()),
@@ -699,10 +552,10 @@ mod tests {
             ),
         );
 
-        c.client = FakeClient::new(
+        c.client = rmt::FakeClient::new(
             url.clone(),
             second_request,
-            FakeResponse{
+            rmt::FakeResponse{
                 status: reqwest::StatusCode::NotModified,
                 headers: response_headers,
                 body: io::Cursor::new(b""[..].into()),
@@ -734,10 +587,10 @@ mod tests {
         );
 
         let mut c = make_test_cache(
-            FakeClient::new(
+            rmt::FakeClient::new(
                 url.clone(),
                 request_1_headers,
-                FakeResponse{
+                rmt::FakeResponse{
                     status: reqwest::StatusCode::Ok,
                     headers: response_1_headers,
                     body: io::Cursor::new(b"hello".as_ref().into()),
@@ -767,10 +620,10 @@ mod tests {
             ),
         );
 
-        c.client = FakeClient::new(
+        c.client = rmt::FakeClient::new(
             url.clone(),
             request_2_headers,
-            FakeResponse{
+            rmt::FakeResponse{
                 status: reqwest::StatusCode::Ok,
                 headers: response_2_headers,
                 body: io::Cursor::new(b"world".as_ref().into()),
@@ -798,10 +651,10 @@ mod tests {
         );
         let response_3_headers = reqwest::header::Headers::default();
 
-        c.client = FakeClient::new(
+        c.client = rmt::FakeClient::new(
             url.clone(),
             request_3_headers,
-            FakeResponse{
+            rmt::FakeResponse{
                 status: reqwest::StatusCode::NotModified,
                 headers: response_3_headers,
                 body: io::Cursor::new(b"".as_ref().into()),
