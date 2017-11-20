@@ -139,6 +139,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
             },
         };
 
+        // Record the response from the server in our cache.
         let content_dir = self.root.join("content");
         fs::DirBuilder::new()
             .recursive(true)
