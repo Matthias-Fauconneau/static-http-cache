@@ -107,6 +107,11 @@ impl<C: reqwest_mock::Client> Cache<C> {
                         reqwest::header::IfModifiedSince(timestamp),
                     );
                 }
+                if let Some(etag) = et {
+                    request.headers_mut().set(
+                        reqwest::header::IfNoneMatch::Items(vec![etag]),
+                    );
+                }
 
                 let maybe_validation = self.client
                     .execute(request)
@@ -157,7 +162,11 @@ impl<C: reqwest_mock::Client> Cache<C> {
                     .map(|&reqwest::header::LastModified(date)| {
                         date
                     }),
-                etag: None,
+                etag: response.headers()
+                    .get::<reqwest::header::ETag>()
+                    .map(|&reqwest::header::ETag(ref etag)| {
+                        etag.clone()
+                    }),
             },
         )?;
 
@@ -636,13 +645,167 @@ mod tests {
         c.client.assert_called();
     }
 
+    #[test]
+    fn use_cache_data_if_some_match() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+        let body = b"hello world";
 
-    // Things to test:
-    // - if the response has an "etag" header, record it in the cache.
-    //   - a subsequent request should send "if-none-match".
-    //   - subsequent response 200 should download to "body.part" then rename.
-    //   - subsequent response 304 should just open the existing file.
-    //   - error responses should leave the existing file alone.
-    //
+        // We send a request, and the server responds with the data,
+        // and an "Etag" header.
+        let mut response_headers = reqwest::header::Headers::default();
+        response_headers.set(
+            reqwest::header::ETag(
+                reqwest::header::EntityTag::strong("abcd".into()),
+            ),
+        );
+
+        let mut c = make_test_cache(
+            FakeClient::new(
+                url.clone(),
+                reqwest::header::Headers::default(),
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: response_headers.clone(),
+                    body: io::Cursor::new(body.as_ref().into()),
+                }
+            ),
+        );
+
+        // The response and its etag should now be recorded
+        // in the cache.
+        c.get(url.clone()).unwrap();
+        c.client.assert_called();
+
+        // For the next request, we expect the request to include the
+        // etag in the "if none match" header, and we'll give
+        // the "no, it hasn't been modified" response.
+        let mut second_request = reqwest::header::Headers::default();
+        second_request.set(
+            reqwest::header::IfNoneMatch::Items(
+                vec![
+                    reqwest::header::EntityTag::strong("abcd".into()),
+                ],
+            ),
+        );
+
+        c.client = FakeClient::new(
+            url.clone(),
+            second_request,
+            FakeResponse{
+                status: reqwest::StatusCode::NotModified,
+                headers: response_headers,
+                body: io::Cursor::new(b""[..].into()),
+            },
+        );
+
+        // Now when we make the request, even though the actual response
+        // did not include a body, we should get the complete body from
+        // the local cache.
+        let mut res = c.get(url).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, body);
+        c.client.assert_called();
+    }
+
+    #[test]
+    fn update_cache_if_none_match() {
+        let url: reqwest::Url = "http://example.com/".parse().unwrap();
+
+        // We send a request, and the server responds with the data,
+        // and an "ETag" header.
+        let request_1_headers = reqwest::header::Headers::default();
+        let mut response_1_headers = reqwest::header::Headers::default();
+        response_1_headers.set(
+            reqwest::header::ETag(
+                reqwest::header::EntityTag::strong("abcd".into()),
+            ),
+        );
+
+        let mut c = make_test_cache(
+            FakeClient::new(
+                url.clone(),
+                request_1_headers,
+                FakeResponse{
+                    status: reqwest::StatusCode::Ok,
+                    headers: response_1_headers,
+                    body: io::Cursor::new(b"hello".as_ref().into()),
+                }
+            ),
+        );
+
+        // The response and its etag should now be recorded in the cache.
+        c.get(url.clone()).unwrap();
+        c.client.assert_called();
+
+        // For the next request, we expect the request to include the
+        // etag in the "if none match" header, and we'll give
+        // the "yes, it has been modified" response with a new etag.
+        let mut request_2_headers = reqwest::header::Headers::default();
+        request_2_headers.set(
+            reqwest::header::IfNoneMatch::Items(
+                vec![
+                    reqwest::header::EntityTag::strong("abcd".into()),
+                ],
+            ),
+        );
+        let mut response_2_headers = reqwest::header::Headers::default();
+        response_2_headers.set(
+            reqwest::header::ETag(
+                reqwest::header::EntityTag::strong("efgh".into()),
+            ),
+        );
+
+        c.client = FakeClient::new(
+            url.clone(),
+            request_2_headers,
+            FakeResponse{
+                status: reqwest::StatusCode::Ok,
+                headers: response_2_headers,
+                body: io::Cursor::new(b"world".as_ref().into()),
+            },
+        );
+
+        // Now when we make the request, we should get the new body and
+        // ignore what's in the cache.
+        let mut res = c.get(url.clone()).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, b"world");
+        c.client.assert_called();
+
+        // If we make another request, we should set If-None-Match
+        // to match the second response, and be able to return the data from
+        // the second response.
+        let mut request_3_headers = reqwest::header::Headers::default();
+        request_3_headers.set(
+            reqwest::header::IfNoneMatch::Items(
+                vec![
+                    reqwest::header::EntityTag::strong("efgh".into()),
+                ],
+            ),
+        );
+        let response_3_headers = reqwest::header::Headers::default();
+
+        c.client = FakeClient::new(
+            url.clone(),
+            request_3_headers,
+            FakeResponse{
+                status: reqwest::StatusCode::NotModified,
+                headers: response_3_headers,
+                body: io::Cursor::new(b"".as_ref().into()),
+            },
+        );
+
+        // Now when we make the request, we should get updated info from the
+        // cache.
+        let mut res = c.get(url).unwrap();
+        let mut buf = vec![];
+        res.read_to_end(&mut buf).unwrap();
+        assert_eq!(&buf, b"world");
+        c.client.assert_called();
+    }
+
+
     // See also: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching
 }
