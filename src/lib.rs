@@ -1,6 +1,17 @@
 //! A local cache for static HTTP resources.
 //!
 //! Ain't that great?
+//!
+//! You probably want to create a `Cache` and call the `get()` method.
+//!
+//! TODO:
+//!
+//!   - break big long functions up into helper functions?
+//!   - write an example tool that uses the library
+//!   - proper error reporting
+//!   - write documentation!
+//!   - evaluate API against the API guidelines:
+//!     https://rust-lang-nursery.github.io/api-guidelines/
 extern crate crypto_hash;
 #[macro_use]
 extern crate log;
