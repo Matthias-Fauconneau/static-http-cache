@@ -18,14 +18,14 @@ const SCHEMA_SQL: &str = "
 
 
 /// All the information we have about a given URL.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CacheRecord {
     /// The path to the cached response body on disk.
     pub path: String,
     /// The value of the Last-Modified header in the original response.
     pub last_modified: Option<reqwest::header::HttpDate>,
     /// The value of the Etag header in the original response.
-    pub etag: Option<String>,
+    pub etag: Option<reqwest::header::EntityTag>,
 }
 
 
@@ -133,6 +133,8 @@ impl CacheDB {
     pub fn get(&self, mut url: reqwest::Url)
         -> Result<CacheRecord, Box<error::Error>>
     {
+        use std::str::FromStr;
+
         url.set_fragment(None);
 
         let mut rows = self.query("
@@ -158,7 +160,6 @@ impl CacheDB {
 
                 let last_modified = match cols.next().unwrap() {
                     sqlite::Value::String(s) => {
-                        use std::str::FromStr;
                         Some(reqwest::header::HttpDate::from_str(&s)?)
                     },
                     sqlite::Value::Null => { None },
@@ -172,11 +173,13 @@ impl CacheDB {
                 };
 
                 let etag = match cols.next().unwrap() {
-                    sqlite::Value::String(s) => { Some(s) },
+                    sqlite::Value::String(s) => {
+                        Some(reqwest::header::EntityTag::from_str(&s)?)
+                    },
                     sqlite::Value::Null => { None },
                     other => {
                         warn!(
-                            "last_modified contained weird type: {:?}",
+                            "etag contained weird type: {:?}",
                             other,
                         );
                         None
@@ -219,7 +222,9 @@ impl CacheDB {
                     })
                     .unwrap_or(sqlite::Value::Null),
                 record.etag
-                    .map(|etag| { sqlite::Value::String(etag) })
+                    .map(|etag| {
+                        sqlite::Value::String(format!("{}", etag))
+                    })
                     .unwrap_or(sqlite::Value::Null),
             ],
         )?;
@@ -347,7 +352,7 @@ mod tests {
             last_modified: Some(reqwest::header::HttpDate::from_str(
                 "Thu, 01 Jan 1970 00:00:00 GMT"
             ).unwrap()),
-            etag: Some("some-crazy-text".into()),
+            etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
         };
 
         db.set(
@@ -487,7 +492,7 @@ mod tests {
             last_modified: Some(reqwest::header::HttpDate::from_str(
                 "Thu, 01 Jan 1970 00:00:00 GMT"
             ).unwrap()),
-            etag: Some("some-crazy-text".into()),
+            etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
         };
 
         let mut db = super::CacheDB::new(":memory:").unwrap();
@@ -533,13 +538,13 @@ mod tests {
         let record_one = super::CacheRecord{
             path: "path/to/data/one".into(),
             last_modified: None,
-            etag: Some("one".into()),
+            etag: Some(reqwest::header::EntityTag::strong("one".into())),
         };
 
         let record_two = super::CacheRecord{
             path: "path/to/data/two".into(),
             last_modified: None,
-            etag: Some("two".into()),
+            etag: Some(reqwest::header::EntityTag::strong("two".into())),
         };
 
         let mut db = super::CacheDB::new(":memory:").unwrap();
@@ -568,13 +573,13 @@ mod tests {
         let record_one = super::CacheRecord{
             path: "path/to/data/one".into(),
             last_modified: None,
-            etag: Some("one".into()),
+            etag: Some(reqwest::header::EntityTag::strong("one".into())),
         };
 
         let record_two = super::CacheRecord{
             path: "path/to/data/two".into(),
             last_modified: None,
-            etag: Some("two".into()),
+            etag: Some(reqwest::header::EntityTag::strong("two".into())),
         };
 
         let mut db = super::CacheDB::new(":memory:").unwrap();
