@@ -1,7 +1,5 @@
 //! A local cache for static HTTP resources.
 //!
-//! Ain't that great?
-//!
 //! You probably want to create a `Cache` and call the `get()` method.
 //!
 //! TODO:
@@ -12,6 +10,14 @@
 //!   - write documentation!
 //!   - evaluate API against the API guidelines:
 //!     https://rust-lang-nursery.github.io/api-guidelines/
+//!   - make sure each public type's interface is defined by a trait.
+//!   - `Cache::get()` needs a callback to report download progress.
+//!   - if `Cache::get()` updates the locally cached data, it should
+//!     delete the file containing the stale data.
+//!   - Add support for other caching-relevant headers, like Expires
+//!     or Cache-Control.
+//!   - Support "freshness", so we can sometimes answer from the cache
+//!     without having to talk to the remote server at all.
 extern crate crypto_hash;
 #[macro_use]
 extern crate log;
@@ -96,6 +102,17 @@ impl<C: reqwest_mock::Client> Cache<C> {
         Ok(Cache { root, db, client })
     }
 
+    /// Retrieve the content of the given URL.
+    ///
+    /// If we've never seen this URL before, we will try to retrieve it
+    /// and store its data locally.
+    /// If we have seen this URL before, we will check with the server
+    /// to see if our cached data is stale. If it is, we'll download
+    /// the new version and store it locally, otherwise we'll re-use
+    /// the local copy we already have.
+    ///
+    /// Returns a file-handle to the local copy of the data, open for
+    /// reading.
     pub fn get(&mut self, mut url: reqwest::Url)
         -> Result<fs::File, Box<error::Error>>
     {
