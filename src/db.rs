@@ -178,10 +178,7 @@ impl CacheDB {
                     },
                     sqlite::Value::Null => { None },
                     other => {
-                        warn!(
-                            "etag contained weird type: {:?}",
-                            other,
-                        );
+                        warn!("etag contained weird type: {:?}", other);
                         None
                     },
                 };
