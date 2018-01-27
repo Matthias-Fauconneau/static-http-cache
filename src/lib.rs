@@ -7,8 +7,9 @@
 //!   - write an example tool that uses the library
 //!   - proper error reporting
 //!   - write documentation!
-//!   - evaluate API against the API guidelines:
-//!     https://rust-lang-nursery.github.io/api-guidelines/
+//!   - record usage counts and dates for entries in the cache, so we can
+//!     automatically clean them up.
+//!   - evaluate API against the [Rust API guidelines][rapig]
 //!   - make sure each public type's interface is defined by a trait.
 //!   - `Cache::get()` needs a callback to report download progress.
 //!   - if `Cache::get()` updates the locally cached data, it should
@@ -17,6 +18,8 @@
 //!     or Cache-Control.
 //!   - Support "freshness", so we can sometimes answer from the cache
 //!     without having to talk to the remote server at all.
+//!
+//! [rapig]: https://rust-lang-nursery.github.io/api-guidelines/
 extern crate crypto_hash;
 #[macro_use]
 extern crate log;
