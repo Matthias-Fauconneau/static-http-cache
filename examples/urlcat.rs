@@ -1,5 +1,6 @@
 extern crate static_http_cache;
 extern crate reqwest;
+extern crate stderrlog;
 
 use std::env;
 use std::error::Error;
@@ -35,6 +36,12 @@ fn parse_args<T: Iterator<Item=String>>(mut args: T)
 
 
 fn main() {
+    stderrlog::new()
+        .verbosity(3) // show debug-level log messages
+        .timestamp(stderrlog::Timestamp::Microsecond)
+        .init()
+        .expect("Could not init logging");
+
     match parse_args(env::args().skip(1)) {
         Ok(mut file) => {
             let mut stdout = io::stdout();
