@@ -60,23 +60,23 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn commit(mut self) -> Result<(), Box<error::Error>> {
-        println!("Attempting to commit changes...");
+        debug!("Attempting to commit changes...");
         self.committed = true;
 
         self.conn.execute("COMMIT;").map_err(|err| {
-            println!("Failed to commit changes: {}", err);
+            debug!("Failed to commit changes: {}", err);
             match self.conn.execute("ROLLBACK;") {
                 // Rollback worked, return the original error
                 Ok(_) => err,
                 // Rollback failed too! Let's warn about that,
                 // but return the original error.
                 Err(new_err) => {
-                    println!("Failed to rollback too! {}", new_err);
+                    debug!("Failed to rollback too! {}", new_err);
                     err
                 },
             }
         })?;
-        println!("Commit successful!");
+        debug!("Commit successful!");
         Ok(())
     }
 }
@@ -84,11 +84,11 @@ impl<'a> Transaction<'a> {
 impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         if self.committed {
-            println!("Changes already committed, nothing to do.")
+            debug!("Changes already committed, nothing to do.")
         } else {
-            println!("Attempting to rollback changes...");
+            debug!("Attempting to rollback changes...");
             self.conn.execute("ROLLBACK;").unwrap_or_else(|err| {
-                println!("Failed to rollback changes: {}", err)
+                debug!("Failed to rollback changes: {}", err)
             })
         }
     }
@@ -473,7 +473,7 @@ mod tests {
             "SELECT * FROM urls;",
             &[],
         ).unwrap().collect();
-        println!("Table content: {:?}", rows);
+        debug!("Table content: {:?}", rows);
 
         // Did our data make it into the DB?
         assert_eq!(db.get(url).unwrap(), record);
