@@ -111,7 +111,7 @@ impl CacheDB {
             &[],
         )?.collect();
         if let sqlite::Value::Integer(0) = rows[0][0] {
-            // No tables define in this DB, let's load our schema.
+            debug!("No tables in the cache DB, loading schema.");
             res.0.execute(SCHEMA_SQL)?
         }
 
@@ -122,7 +122,11 @@ impl CacheDB {
         &'a self,
         query: T,
         params: &[sqlite::Value],
-    ) -> sqlite::Result<Rows> {
+    ) -> sqlite::Result<Rows>
+    where T: ::std::fmt::Debug
+    {
+        debug!("Executing query: {:?} with values {:?}", query, params);
+
         let mut cur = self.0.prepare(query)?.cursor();
         cur.bind(params)?;
 
@@ -182,6 +186,8 @@ impl CacheDB {
                         None
                     },
                 };
+
+                debug!("Cache says URL {:?} content is at {:?}, etag {:?}, last modified at {:?}", url, path, etag, last_modified);
 
                 Ok(CacheRecord{path, last_modified, etag})
             })?

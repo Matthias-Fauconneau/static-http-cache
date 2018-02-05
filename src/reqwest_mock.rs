@@ -1,6 +1,7 @@
 //! Traits describing parts of the `reqwest` library, so that we can override
 //! them in tests.
 use std::error;
+use std::fmt;
 use std::io;
 
 use reqwest;
@@ -9,7 +10,7 @@ use reqwest;
 /// Represents the result of sending an HTTP request.
 ///
 /// Modelled after `reqwest::Response`.
-pub trait HttpResponse: io::Read
+pub trait HttpResponse: io::Read + fmt::Debug
     where Self: ::std::marker::Sized
 {
     /// Obtain access to the headers of the response.
@@ -88,7 +89,7 @@ pub mod tests {
     }
 
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct FakeResponse {
         pub status: reqwest::StatusCode,
         pub headers: reqwest::header::Headers,

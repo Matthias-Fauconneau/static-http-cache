@@ -188,12 +188,16 @@ impl<C: reqwest_mock::Client> GenericCache<C> {
                     );
                 }
 
+                info!("Sending HTTP request: {:?}", request);
+
                 let maybe_validation = self.client
                     .execute(request)
                     .and_then(|resp| { resp.error_for_status() });
 
                 match maybe_validation {
                     Ok(new_response) => {
+                        info!("Got HTTP response: {:?}", new_response);
+
                         // If our existing cached data is still fresh...
                         if new_response.status() == StatusCode::NotModified {
                             // ... let's use it as is.
