@@ -4,7 +4,6 @@
 //!
 //! TODO:
 //!
-//!   - write an example tool that uses the library
 //!   - proper error reporting
 //!   - write documentation!
 //!   - record usage counts and dates for entries in the cache, so we can
