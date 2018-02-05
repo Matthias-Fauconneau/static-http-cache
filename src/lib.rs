@@ -244,6 +244,7 @@ impl<C: reqwest_mock::Client> GenericCache<C> {
 
 #[cfg(test)]
 mod tests {
+    extern crate env_logger;
     extern crate tempdir;
 
     use reqwest;
@@ -268,6 +269,8 @@ mod tests {
 
     #[test]
     fn initial_request_success() {
+        let _ = env_logger::try_init();
+
         let url_text = "http://example.com/";
         let url: reqwest::Url = url_text.parse().unwrap();
 
@@ -295,6 +298,8 @@ mod tests {
 
     #[test]
     fn initial_request_failure() {
+        let _ = env_logger::try_init();
+
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
         let mut c = make_test_cache(
             rmt::FakeClient::new(
@@ -315,6 +320,8 @@ mod tests {
 
     #[test]
     fn ignore_fragment_in_url() {
+        let _ = env_logger::try_init();
+
         let url_fragment: reqwest::Url = "http://example.com/#frag"
             .parse()
             .unwrap();
@@ -341,6 +348,8 @@ mod tests {
 
     #[test]
     fn use_cache_data_if_not_modified_since() {
+        let _ = env_logger::try_init();
+
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
         let body = b"hello world";
 
@@ -396,6 +405,8 @@ mod tests {
 
     #[test]
     fn update_cache_if_modified_since() {
+        let _ = env_logger::try_init();
+
         use std::str::FromStr;
 
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
@@ -494,6 +505,8 @@ mod tests {
 
     #[test]
     fn return_existing_data_on_connection_refused() {
+        let _ = env_logger::try_init();
+
         use std::str::FromStr;
 
         let temp_path = tempdir::TempDir::new("http-cache-test")
@@ -559,6 +572,8 @@ mod tests {
 
     #[test]
     fn use_cache_data_if_some_match() {
+        let _ = env_logger::try_init();
+
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
         let body = b"hello world";
 
@@ -622,6 +637,8 @@ mod tests {
 
     #[test]
     fn update_cache_if_none_match() {
+        let _ = env_logger::try_init();
+
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
 
         // We send a request, and the server responds with the data,
