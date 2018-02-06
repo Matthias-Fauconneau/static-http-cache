@@ -1,6 +1,65 @@
-//! A local cache for static HTTP resources.
+//! Introduction
+//! ------------
 //!
-//! You probably want to create a `Cache` and call the `get()` method.
+//! `static_http_cache` is a local cache for static HTTP resources.
+//!
+//! This library maintains a cache of HTTP resources
+//! in a local directory you specify.
+//! Whenever you ask it for the contents of a URL,
+//! it will re-use a previously-downloaded copy
+//! if the resource has not changed on the server.
+//! Otherwise,
+//! it will download the new version and use that instead.
+//!
+//! `static_http_cache` uses the [Reqwest][rq] crate for HTTP operations,
+//! so it should properly handle HTTPS negotiation
+//! and use the operating-system's certificate store.
+//!
+//! Currently,
+//! `static_http_cache` only uses the `Last-Modified` and `ETag` HTTP headers
+//! to determine when its cached data is out of date.
+//! Therefore,
+//! it's not suitable for general-purpose HTTP caching;
+//! it's best suited for static content like Amazon S3 data,
+//! or Apache or nginx serving up a filesystem directory.
+//!
+//! [rq]: https://crates.io/crates/reqwest
+//!
+//! First Example
+//! -------------
+//!
+//! To use this crate, you need to construct a [`Cache`]
+//! then call its [`get`] method:
+//!
+//!     extern crate reqwest;
+//!     extern crate static_http_cache;
+//!
+//!     use std::error::Error;
+//!     use std::fs::File;
+//!     use std::path::PathBuf;
+//!
+//!     fn get_my_resource() -> Result<File, Box<Error>> {
+//!         let mut cache = static_http_cache::Cache::new(
+//!             PathBuf::from("my_cache_directory"),
+//!             reqwest::Client::new(),
+//!         )?;
+//!
+//!         cache.get(reqwest::Url::parse("http://example.com/some-resource")?)
+//!     }
+//!
+//! For repeated queries in the same program,
+//! you'd probably want to create the `Cache` once
+//! and call `get` repeatedly,
+//! of course.
+//!
+//! [`Cache`]: type.Cache.html
+//! [`get`]: struct.GenericCache.html#method.get
+//!
+//! For a complete, minimal example of how to use `static_http_cache`,
+//! see the included [simple example][ex].
+//!
+//! [ex]: https://gitlab.com/Screwtapello/static_http_cache/blob/master/examples/simple.rs
+
 extern crate crypto_hash;
 #[macro_use]
 extern crate log;
