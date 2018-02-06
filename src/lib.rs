@@ -52,8 +52,8 @@
 //! and call `get` repeatedly,
 //! of course.
 //!
-//! [`Cache`]: type.Cache.html
-//! [`get`]: struct.GenericCache.html#method.get
+//! [`Cache`]: struct.Cache.html
+//! [`get`]: struct.Cache.html#method.get
 //!
 //! For a complete, minimal example of how to use `static_http_cache`,
 //! see the included [simple example][ex].
@@ -113,25 +113,26 @@ fn make_random_file<P: AsRef<path::Path>>(parent: P)
 }
 
 
-/// Represents a local cache of HTTP bodies.
+/// Represents a local cache of HTTP resources.
 ///
-/// Requests sent via this cache to URLs it hasn't seen before will
-/// automatically be cached; requests sent to previously-seen URLs will be
-/// revalidated against the server and returned from the cache if nothing has
-/// changed.
-pub type Cache = GenericCache<reqwest::Client>;
-
-/// A local cache that supports a pluggable network backend.
+/// Whenever you ask it for the contents of a URL,
+/// it will re-use a previously-downloaded copy
+/// if the resource has not changed on the server.
+/// Otherwise,
+/// it will download the new version and use that instead.
 ///
-/// You probably want to use the standard `Cache` instead.
-pub struct GenericCache<C: reqwest_mock::Client> {
+/// See [an example](index.html#first-example).
+///
+/// [`reqwest_mock::Client`]: reqwest_mock/trait.Client.html
+/// [`Cache`]: struct.Cache.html
+pub struct Cache<C: reqwest_mock::Client> {
     root: path::PathBuf,
     db: db::CacheDB,
     client: C,
 }
 
 
-impl<C: reqwest_mock::Client> GenericCache<C> {
+impl<C: reqwest_mock::Client> Cache<C> {
 
     /// Returns a Cache that wraps `client` and caches data in `root`.
     ///
@@ -140,7 +141,7 @@ impl<C: reqwest_mock::Client> GenericCache<C> {
     ///
     /// The client should almost certainly be a `reqwest::Client`.
     pub fn new(root: path::PathBuf, client: C)
-        -> Result<GenericCache<C>, Box<error::Error>>
+        -> Result<Cache<C>, Box<error::Error>>
     {
         fs::DirBuilder::new()
             .recursive(true)
@@ -148,7 +149,7 @@ impl<C: reqwest_mock::Client> GenericCache<C> {
 
         let db = db::CacheDB::new(root.join("cache.db"))?;
 
-        Ok(GenericCache { root, db, client })
+        Ok(Cache { root, db, client })
     }
 
     fn record_response(&mut self, url: reqwest::Url, response: &C::Response)
@@ -298,9 +299,9 @@ mod tests {
 
 
     fn make_test_cache(client: rmt::FakeClient)
-        -> super::GenericCache<rmt::FakeClient>
+        -> super::Cache<rmt::FakeClient>
     {
-        super::GenericCache::new(
+        super::Cache::new(
             tempdir::TempDir::new("http-cache-test").unwrap().into_path(),
             client,
         ).unwrap()
@@ -565,7 +566,7 @@ mod tests {
             ).unwrap(),
         ));
 
-        let mut c = super::GenericCache::new(
+        let mut c = super::Cache::new(
             temp_path.clone(),
             rmt::FakeClient::new(
                 url.clone(),
@@ -593,7 +594,7 @@ mod tests {
         ));
 
         // This time, however, the request will return an error.
-        let mut c = super::GenericCache::new(
+        let mut c = super::Cache::new(
             temp_path.clone(),
             rmt::BrokenClient::new(
                 url.clone(),
