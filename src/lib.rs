@@ -137,9 +137,30 @@ impl<C: reqwest_mock::Client> Cache<C> {
     /// Returns a Cache that wraps `client` and caches data in `root`.
     ///
     /// If the directory `root` does not exist, it will be created.
-    /// If it does exist, previously cached data will be available.
+    /// If multiple instances share the same `root`
+    /// (concurrently or in series),
+    /// each instance will be able to re-use resources downloaded by
+    /// the others.
     ///
-    /// The client should almost certainly be a `reqwest::Client`.
+    /// `client` should almost certainly be a `reqwest::Client`,
+    /// but you can use any type that implements [`reqwest_mock::Client`]
+    /// if you want to use a different HTTP client library
+    /// or a test double of some kind.
+    ///
+    ///     # extern crate reqwest;
+    ///     # extern crate static_http_cache;
+    ///     # use std::error::Error;
+    ///     # use std::fs::File;
+    ///     # use std::path::PathBuf;
+    ///     # fn get_my_resource() -> Result<(), Box<Error>> {
+    ///     let mut cache = static_http_cache::Cache::new(
+    ///         PathBuf::from("my_cache_directory"),
+    ///         reqwest::Client::new(),
+    ///     )?;
+    ///     # Ok(())
+    ///     # }
+    ///
+    /// [`reqwest_mock::Client`]: reqwest_mock/trait.Client.html
     pub fn new(root: path::PathBuf, client: C)
         -> Result<Cache<C>, Box<error::Error>>
     {
@@ -202,6 +223,20 @@ impl<C: reqwest_mock::Client> Cache<C> {
     ///
     /// Returns a file-handle to the local copy of the data, open for
     /// reading.
+    ///
+    ///     # extern crate reqwest;
+    ///     # extern crate static_http_cache;
+    ///     # use std::error::Error;
+    ///     # use std::fs::File;
+    ///     # use std::path::PathBuf;
+    ///     # fn get_my_resource() -> Result<(), Box<Error>> {
+    ///     # let mut cache = static_http_cache::Cache::new(
+    ///     #     PathBuf::from("my_cache_directory"),
+    ///     #     reqwest::Client::new(),
+    ///     # )?;
+    ///     let file = cache.get(reqwest::Url::parse("http://example.com/some-resource")?)?;
+    ///     # Ok(())
+    ///     # }
     pub fn get(&mut self, mut url: reqwest::Url)
         -> Result<fs::File, Box<error::Error>>
     {

@@ -1,5 +1,8 @@
 //! Traits describing parts of the `reqwest` library, so that we can override
 //! them in tests.
+//!
+//! You do not need to care about this module
+//! if you just want to use this crate.
 use std::error;
 use std::fmt;
 use std::io;
