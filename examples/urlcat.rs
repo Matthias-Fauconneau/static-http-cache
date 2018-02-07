@@ -40,7 +40,7 @@ fn main() {
 
     match parse_args(env::args().skip(1)) {
         Ok(mut file) => {
-            let mut stdout = io::stdout();
+            let stdout = io::stdout();
             io::copy(&mut file, &mut stdout.lock()).expect("could not write to stdout");
         },
         Err(e) => {
