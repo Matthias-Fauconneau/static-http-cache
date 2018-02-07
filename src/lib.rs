@@ -12,6 +12,9 @@
 //! Otherwise,
 //! it will download the new version and use that instead.
 //!
+//! Because it only supports static resources,
+//! `static_http_cache` only sends HTTP `GET` requests.
+//!
 //! `static_http_cache` uses the [Reqwest][rq] crate for HTTP operations,
 //! so it should properly handle HTTPS negotiation
 //! and use the operating-system's certificate store.
@@ -259,7 +262,9 @@ impl<C: reqwest_mock::Client> Cache<C> {
 
     /// Retrieve the content of the given URL.
     ///
-    /// If we've never seen this URL before, we will try to retrieve it
+    /// If we've never seen this URL before,
+    /// we will try to retrieve it
+    /// (with a `GET` request)
     /// and store its data locally.
     ///
     /// If we have seen this URL before, we will ask the server
