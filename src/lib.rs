@@ -1,5 +1,5 @@
 //! Introduction
-//! ------------
+//! ============
 //!
 //! `static_http_cache` is a local cache for static HTTP resources.
 //!
@@ -26,7 +26,7 @@
 //! [rq]: https://crates.io/crates/reqwest
 //!
 //! First Example
-//! -------------
+//! =============
 //!
 //! To use this crate, you need to construct a [`Cache`]
 //! then call its [`get`] method:
@@ -59,6 +59,37 @@
 //! see the included [simple example][ex].
 //!
 //! [ex]: https://gitlab.com/Screwtapello/static_http_cache/blob/master/examples/simple.rs
+//!
+//! Capabilities
+//! ============
+//!
+//! Alternative HTTP backends
+//! -------------------------
+//!
+//! Although `static_http_cache` is designed to work with the `reqwest` library,
+//! it will accept any type that implements
+//! the traits in the [`reqwest_mock`] module.
+//! If you want to use it with an alternative HTTP backend,
+//! or if you need to stub out network access for testing purposes,
+//! you can do that.
+//!
+//! [`reqwest_mock`]: reqwest_mock/index.html
+//!
+//! Concurrent cache sharing
+//! ------------------------
+//!
+//! Cache metadata is stored in a SQLite database,
+//! so it's safe to give different threads
+//! (or even different processes)
+//! their own [`Cache`] instance
+//! backed by the same filesystem path.
+//!
+//! Note that while it's *safe* to have multiple things
+//! managing the same cache,
+//! it's not necessarily performant:
+//! a [`Cache`] instance that's downloading a new or updated file
+//! is likely to stall other cache reads or writes
+//! until it's complete.
 
 extern crate crypto_hash;
 #[macro_use]
