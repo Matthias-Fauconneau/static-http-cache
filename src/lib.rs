@@ -192,6 +192,19 @@ impl<C: reqwest_mock::Client> Cache<C> {
     ///     # }
     ///
     /// [`reqwest_mock::Client`]: reqwest_mock/trait.Client.html
+    ///
+    /// Errors
+    /// ======
+    ///
+    /// This method may return an error:
+    ///
+    ///   - if `root` cannot be created, or cannot be written to
+    ///   - if the metadata database cannot be created or cannot be written to
+    ///   - if the metadata database is corrupt
+    ///
+    /// In all cases, it should be safe to blow away the entire directory
+    /// and start from scratch.
+    /// It's only cached data, after all.
     pub fn new(root: path::PathBuf, client: C)
         -> Result<Cache<C>, Box<error::Error>>
     {
@@ -247,10 +260,15 @@ impl<C: reqwest_mock::Client> Cache<C> {
     ///
     /// If we've never seen this URL before, we will try to retrieve it
     /// and store its data locally.
-    /// If we have seen this URL before, we will check with the server
-    /// to see if our cached data is stale. If it is, we'll download
-    /// the new version and store it locally, otherwise we'll re-use
-    /// the local copy we already have.
+    ///
+    /// If we have seen this URL before, we will ask the server
+    /// whether our cached data is stale.
+    /// If our data is stale,
+    /// we'll download the new version
+    /// and store it locally.
+    /// If our data is fresh,
+    /// or if we can't talk to the remote server,
+    /// we'll re-use the local copy we already have.
     ///
     /// Returns a file-handle to the local copy of the data, open for
     /// reading.
@@ -268,6 +286,24 @@ impl<C: reqwest_mock::Client> Cache<C> {
     ///     let file = cache.get(reqwest::Url::parse("http://example.com/some-resource")?)?;
     ///     # Ok(())
     ///     # }
+    ///
+    /// Errors
+    /// ======
+    ///
+    /// This method may return an error:
+    ///
+    ///   - if the cache metadata is corrupt
+    ///   - if the requested resource is not cached,
+    ///     and we can't connect to/download it
+    ///   - if we can't update the cache metadata
+    ///   - if the cache metadata points to a local file that doesn't exist
+    ///
+    /// After returning a network-related or disk I/O-related error,
+    /// this `Cache` instance should be OK and you may keep using it.
+    /// If it returns a database-related error,
+    /// the on-disk storage *should* be OK,
+    /// so you might want to destroy this `Cache` instance
+    /// and create a new one pointing at the same location.
     pub fn get(&mut self, mut url: reqwest::Url)
         -> Result<fs::File, Box<error::Error>>
     {

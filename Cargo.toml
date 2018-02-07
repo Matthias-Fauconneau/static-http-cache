@@ -2,6 +2,7 @@
 name = "static-http-cache"
 version = "0.1.0"
 authors = ["Tim Allen <screwtape@froup.com>"]
+description = "A local cache for static HTTP resources"
 
 [dependencies]
 crypto-hash = "0.3.0"
