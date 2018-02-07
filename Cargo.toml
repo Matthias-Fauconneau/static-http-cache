@@ -1,8 +1,13 @@
 [package]
 name = "static-http-cache"
-version = "0.1.0"
+version = "0.1.0" # remember to update html_root_url
 authors = ["Tim Allen <screwtape@froup.com>"]
 description = "A local cache for static HTTP resources"
+license = "MIT"
+repository = "https://gitlab.com/Screwtapello/static_http_cache"
+readme = "README.md"
+keywords = ["http", "cache"]
+categories = ["caching", "network-programming", "web-programming::http-client"]
 
 [dependencies]
 crypto-hash = "0.3.0"
