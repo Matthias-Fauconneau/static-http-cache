@@ -268,8 +268,10 @@ impl<C: reqwest_mock::Client> Cache<C> {
     /// we'll download the new version
     /// and store it locally.
     /// If our data is fresh,
-    /// or if we can't talk to the remote server,
     /// we'll re-use the local copy we already have.
+    ///
+    /// If we can't talk to the server to see if our cached data is stale,
+    /// we'll silently re-use the data we have.
     ///
     /// Returns a file-handle to the local copy of the data, open for
     /// reading.
@@ -297,7 +299,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
     ///   - if the requested resource is not cached,
     ///     and we can't connect to/download it
     ///   - if we can't update the cache metadata
-    ///   - if the cache metadata points to a local file that doesn't exist
+    ///   - if the cache metadata points to a local file that no longer exists
     ///
     /// After returning a network-related or disk I/O-related error,
     /// this `Cache` instance should be OK and you may keep using it.
