@@ -178,6 +178,12 @@ impl<C: reqwest_mock::Client> Cache<C> {
     /// each instance will be able to re-use resources downloaded by
     /// the others.
     ///
+    /// For best results,
+    /// choose a `root` that is directly attached to
+    /// the computer running your program,
+    /// such as somewhere inside the `%LOCALAPPDATA%` directory on Windows,
+    /// or the `$XDG_CACHE_HOME` directory on POSIX systems.
+    ///
     /// `client` should almost certainly be a `reqwest::Client`,
     /// but you can use any type that implements [`reqwest_mock::Client`]
     /// if you want to use a different HTTP client library
