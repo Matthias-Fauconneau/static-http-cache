@@ -160,6 +160,7 @@ fn make_random_file<P: AsRef<path::Path>>(parent: P)
 ///
 /// [`reqwest_mock::Client`]: reqwest_mock/trait.Client.html
 /// [`Cache`]: struct.Cache.html
+#[derive(Debug, PartialEq, Eq)]
 pub struct Cache<C: reqwest_mock::Client> {
     root: path::PathBuf,
     db: db::CacheDB,

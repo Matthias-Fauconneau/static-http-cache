@@ -1,4 +1,7 @@
+use std::cmp;
 use std::error;
+use std::ffi;
+use std::fmt;
 use std::iter;
 use std::path;
 
@@ -94,17 +97,45 @@ impl<'a> Drop for Transaction<'a> {
     }
 }
 
+fn canonicalize_db_path<P: AsRef<path::Path>>(path: P)
+    -> Result<path::PathBuf, Box<error::Error>>
+{
+    let mem_path: ffi::OsString = ":memory:".into();
+    let path = path.as_ref();
+
+    Ok(
+        if path == mem_path {
+            // If it's the special ":memory:" path, use it as-is.
+            path.to_path_buf()
+        } else {
+            let parent = path.parent().unwrap_or(path::Path::new("."));
+
+            // Otherwise, canonicalize it so we can reliably compare instances.
+            // The weird joining behaviour is because we require the path
+            // to exist, but we don't require the filename to exist.
+            parent.canonicalize()?.join(path.file_name().unwrap_or(ffi::OsStr::new("")))
+        }
+    )
+}
+
 /// Represents the database that describes the contents of the cache.
-pub struct CacheDB(sqlite::Connection);
+pub struct CacheDB{
+    path: path::PathBuf,
+    conn: sqlite::Connection,
+}
 
 impl CacheDB {
     /// Create a cache database in the given file.
     pub fn new<P: AsRef<path::Path>>(path: P)
         -> Result<CacheDB, Box<error::Error>>
     {
+        let path = canonicalize_db_path(path)?;
+        debug!("Creating cache metadata in {:?}", path);
+        let conn = sqlite::Connection::open(&path)?;
+
         // Package up the return value first, so we can use .query()
         // instead of wrangling sqlite directly.
-        let res = CacheDB(sqlite::Connection::open(path)?);
+        let res = CacheDB{path, conn};
 
         let rows: Vec<_> = res.query(
             "SELECT COUNT(*) FROM sqlite_master;",
@@ -112,7 +143,7 @@ impl CacheDB {
         )?.collect();
         if let sqlite::Value::Integer(0) = rows[0][0] {
             debug!("No tables in the cache DB, loading schema.");
-            res.0.execute(SCHEMA_SQL)?
+            res.conn.execute(SCHEMA_SQL)?
         }
 
         Ok(res)
@@ -127,7 +158,7 @@ impl CacheDB {
     {
         debug!("Executing query: {:?} with values {:?}", query, params);
 
-        let mut cur = self.0.prepare(query)?.cursor();
+        let mut cur = self.conn.prepare(query)?.cursor();
         cur.bind(params)?;
 
         Ok(Rows(cur))
@@ -204,11 +235,11 @@ impl CacheDB {
         // mem::forget() on the Transaction object.
 
         // Start a new transaction...
-        self.0.execute("BEGIN;")?;
+        self.conn.execute("BEGIN;")?;
 
         // ...and immediately construct the value that will clean up
         // the transaction when necessary.
-        let res = Transaction::new(&self.0);
+        let res = Transaction::new(&self.conn);
 
         let rows = self.query("
             INSERT OR REPLACE INTO urls
@@ -238,6 +269,23 @@ impl CacheDB {
         Ok(res)
     }
 }
+
+
+impl fmt::Debug for CacheDB {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CacheDB {{path: {:?}}}", self.path)
+    }
+}
+
+
+impl cmp::PartialEq for CacheDB {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+
+impl cmp::Eq for CacheDB {}
 
 
 #[cfg(test)]
@@ -375,7 +423,7 @@ mod tests {
 
         let db = super::CacheDB::new(":memory:").unwrap();
 
-        db.0.execute("
+        db.conn.execute("
             INSERT INTO urls
                 ( url
                 , path
@@ -404,7 +452,7 @@ mod tests {
 
         let db = super::CacheDB::new(":memory:").unwrap();
 
-        db.0.execute("
+        db.conn.execute("
             INSERT INTO urls
                 ( url
                 , path
@@ -632,5 +680,40 @@ mod tests {
         assert_eq!(
             db.get("http://example.com/".parse().unwrap()).unwrap(),
             record_one
-        );    }
+        );
+    }
+
+    #[test]
+    fn dbs_are_equal_if_paths_are_equal() {
+        let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
+        let db_path = root.join("cache.db");
+
+        let db1 = super::CacheDB::new(&db_path).unwrap();
+        let db2 = super::CacheDB::new(&db_path).unwrap();
+
+        assert_eq!(db1, db2);
+    }
+
+    #[test]
+    fn dbs_not_equal_if_paths_are_different() {
+        let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
+
+        let db1 = super::CacheDB::new(root.join("cache-1.db")).unwrap();
+        let db2 = super::CacheDB::new(root.join("cache-2.db")).unwrap();
+
+        assert_ne!(db1, db2);
+    }
+
+    #[test]
+    fn db_debug_prints_path() {
+        let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
+        let path = root.join("cache.db");
+
+        let db = super::CacheDB::new(&path).unwrap();
+
+        assert_eq!(
+            format!("my db: {:?}", db),
+            format!("my db: CacheDB {{path: {:?}}}", path)
+        );
+    }
 }
