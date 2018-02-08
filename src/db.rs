@@ -97,11 +97,10 @@ impl<'a> Drop for Transaction<'a> {
     }
 }
 
-fn canonicalize_db_path<P: AsRef<path::Path>>(path: P)
+fn canonicalize_db_path(path: path::PathBuf)
     -> Result<path::PathBuf, Box<error::Error>>
 {
     let mem_path: ffi::OsString = ":memory:".into();
-    let path = path.as_ref();
 
     Ok(
         if path == mem_path {
@@ -126,7 +125,7 @@ pub struct CacheDB{
 
 impl CacheDB {
     /// Create a cache database in the given file.
-    pub fn new<P: AsRef<path::Path>>(path: P)
+    pub fn new(path: path::PathBuf)
         -> Result<CacheDB, Box<error::Error>>
     {
         let path = canonicalize_db_path(path)?;
@@ -294,9 +293,11 @@ mod tests {
     use reqwest;
     use sqlite;
 
+    use std::path;
+
     #[test]
     fn create_fresh_db() {
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let rows: Vec<_> = db.query(
             "SELECT name FROM sqlite_master WHERE TYPE = ?1",
@@ -312,7 +313,7 @@ mod tests {
         let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
         let db_path = root.join("cache.db");
 
-        let db1 = super::CacheDB::new(&db_path).unwrap();
+        let db1 = super::CacheDB::new(db_path.clone()).unwrap();
         let rows: Vec<_> = db1.query(
             "SELECT name FROM sqlite_master WHERE TYPE = ?1",
             &[sqlite::Value::String("table".into())],
@@ -320,7 +321,7 @@ mod tests {
         assert_eq!(rows, vec![vec![sqlite::Value::String("urls".into())]]);
 
 
-        let db2 = super::CacheDB::new(&db_path).unwrap();
+        let db2 = super::CacheDB::new(db_path.clone()).unwrap();
         let rows: Vec<_> = db2.query(
             "SELECT name FROM sqlite_master WHERE TYPE = ?1",
             &[sqlite::Value::String("table".into())],
@@ -330,14 +331,14 @@ mod tests {
 
     #[test]
     fn open_bogus_db() {
-        let res = super::CacheDB::new("does/not/exist");
+        let res = super::CacheDB::new(path::PathBuf::new().join("does/not/exist"));
 
         assert_eq!(res.is_err(), true);
     }
 
     #[test]
     fn get_from_empty_db() {
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let err = db.get("http://example.com/".parse().unwrap()).unwrap_err();
 
@@ -349,7 +350,7 @@ mod tests {
 
     #[test]
     fn get_unknown_url() {
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         db.set(
             "http://example.com/one".parse().unwrap(),
@@ -372,7 +373,7 @@ mod tests {
 
     #[test]
     fn get_known_url() {
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
@@ -396,7 +397,7 @@ mod tests {
     fn get_known_url_with_headers() {
         use std::str::FromStr;
 
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
@@ -421,7 +422,7 @@ mod tests {
     #[test]
     fn get_url_with_invalid_path() {
 
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         db.conn.execute("
             INSERT INTO urls
@@ -450,7 +451,7 @@ mod tests {
     #[test]
     fn get_url_with_invalid_last_modified_and_etag() {
 
-        let db = super::CacheDB::new(":memory:").unwrap();
+        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         db.conn.execute("
             INSERT INTO urls
@@ -484,7 +485,7 @@ mod tests {
 
     #[test]
     fn get_ignores_fragments() {
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
@@ -513,7 +514,7 @@ mod tests {
             etag: None,
         };
 
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Add data into the DB, inside a block so we can be sure all the
         //  intermediates have been dropped afterward.
@@ -546,7 +547,7 @@ mod tests {
             etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
         };
 
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Add data into the DB, inside a block so we can be sure all the
         //  intermediates have been dropped afterward.
@@ -565,7 +566,7 @@ mod tests {
             etag: None,
         };
 
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Add data into the DB, inside a block so we can be sure all the
         //  intermediates have been dropped afterward.
@@ -598,7 +599,7 @@ mod tests {
             etag: Some(reqwest::header::EntityTag::strong("two".into())),
         };
 
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Our example URL just returned record one.
         db.set(url.clone(), record_one.clone()).unwrap().commit().unwrap();
@@ -633,7 +634,7 @@ mod tests {
             etag: Some(reqwest::header::EntityTag::strong("two".into())),
         };
 
-        let mut db = super::CacheDB::new(":memory:").unwrap();
+        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Try to insert data with a fragment
         db.set(
@@ -688,8 +689,8 @@ mod tests {
         let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
         let db_path = root.join("cache.db");
 
-        let db1 = super::CacheDB::new(&db_path).unwrap();
-        let db2 = super::CacheDB::new(&db_path).unwrap();
+        let db1 = super::CacheDB::new(db_path.clone()).unwrap();
+        let db2 = super::CacheDB::new(db_path.clone()).unwrap();
 
         assert_eq!(db1, db2);
     }
@@ -709,7 +710,7 @@ mod tests {
         let root = tempdir::TempDir::new("cachedb-test").unwrap().into_path();
         let path = root.join("cache.db");
 
-        let db = super::CacheDB::new(&path).unwrap();
+        let db = super::CacheDB::new(path.clone()).unwrap();
 
         assert_eq!(
             format!("my db: {:?}", db),
