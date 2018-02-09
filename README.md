@@ -1,7 +1,9 @@
 `static_http_cache`, a local disk cache for static HTTP resources
 =================================================================
 
-(insert links to documentation and crates.io)
+  - [Documentation](https://docs.rs/static-http-cache/)
+  - [Package](https://crates.io/crates/static-http-cache)
+  - [Source code](https://gitlab.com/Screwtapello/static_http_cache)
 
 TODO
 ----
