@@ -19,3 +19,5 @@ TODO
     or Cache-Control.
   - Support "freshness", so we can sometimes answer from the cache
     without having to talk to the remote server at all.
+  - Add support for limiting cache size,
+    so we automatically remove old data if the cache gets too big.
