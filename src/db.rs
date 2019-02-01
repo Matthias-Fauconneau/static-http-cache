@@ -23,9 +23,9 @@ pub struct CacheRecord {
     /// The path to the cached response body on disk.
     pub path: String,
     /// The value of the Last-Modified header in the original response.
-    pub last_modified: Option<reqwest::header::HttpDate>,
+    pub last_modified: Option<String>,
     /// The value of the Etag header in the original response.
-    pub etag: Option<reqwest::header::EntityTag>,
+    pub etag: Option<String>,
 }
 
 /// Represents the rows returned by a query.
@@ -164,8 +164,6 @@ impl CacheDB {
         &self,
         mut url: reqwest::Url,
     ) -> Result<CacheRecord, Box<error::Error>> {
-        use std::str::FromStr;
-
         url.set_fragment(None);
 
         let mut rows = self.query(
@@ -191,10 +189,8 @@ impl CacheDB {
                 }?;
 
                 let last_modified = match cols.next().unwrap() {
-                    sqlite::Value::String(s) => {
-                        Some(reqwest::header::HttpDate::from_str(&s)?)
-                    },
-                    sqlite::Value::Null => { None },
+                    sqlite::Value::String(s) => Some(s),
+                    sqlite::Value::Null => None,
                     other => {
                         warn!(
                             "last_modified contained weird type: {:?}",
@@ -205,10 +201,8 @@ impl CacheDB {
                 };
 
                 let etag = match cols.next().unwrap() {
-                    sqlite::Value::String(s) => {
-                        Some(reqwest::header::EntityTag::from_str(&s)?)
-                    },
-                    sqlite::Value::Null => { None },
+                    sqlite::Value::String(s) => Some(s),
+                    sqlite::Value::Null => None,
                     other => {
                         warn!("etag contained weird type: {:?}", other);
                         None
@@ -252,11 +246,11 @@ impl CacheDB {
                 sqlite::Value::String(record.path),
                 record
                     .last_modified
-                    .map(|date| sqlite::Value::String(format!("{}", date)))
+                    .map(|date| sqlite::Value::String(date))
                     .unwrap_or(sqlite::Value::Null),
                 record
                     .etag
-                    .map(|etag| sqlite::Value::String(format!("{}", etag)))
+                    .map(|etag| sqlite::Value::String(etag))
                     .unwrap_or(sqlite::Value::Null),
             ],
         )?;
@@ -404,20 +398,13 @@ mod tests {
 
     #[test]
     fn get_known_url_with_headers() {
-        use std::str::FromStr;
-
         let mut db =
             super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
-            last_modified: Some(
-                reqwest::header::HttpDate::from_str(
-                    "Thu, 01 Jan 1970 00:00:00 GMT",
-                )
-                .unwrap(),
-            ),
-            etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
+            last_modified: Some("Thu, 01 Jan 1970 00:00:00 GMT".into()),
+            etag: Some("some-etag".into()),
         };
 
         db.set("http://example.com/".parse().unwrap(), orig_record.clone())
@@ -555,18 +542,11 @@ mod tests {
 
     #[test]
     fn insert_data_with_all_fields() {
-        use std::str::FromStr;
-
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
         let record = super::CacheRecord {
             path: "path/to/data".into(),
-            last_modified: Some(
-                reqwest::header::HttpDate::from_str(
-                    "Thu, 01 Jan 1970 00:00:00 GMT",
-                )
-                .unwrap(),
-            ),
-            etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
+            last_modified: Some("Thu, 01 Jan 1970 00:00:00 GMT".into()),
+            etag: Some("some-etag".into()),
         };
 
         let mut db =
@@ -617,13 +597,13 @@ mod tests {
         let record_one = super::CacheRecord {
             path: "path/to/data/one".into(),
             last_modified: None,
-            etag: Some(reqwest::header::EntityTag::strong("one".into())),
+            etag: Some("one".into()),
         };
 
         let record_two = super::CacheRecord {
             path: "path/to/data/two".into(),
             last_modified: None,
-            etag: Some(reqwest::header::EntityTag::strong("two".into())),
+            etag: Some("two".into()),
         };
 
         let mut db =
@@ -653,13 +633,13 @@ mod tests {
         let record_one = super::CacheRecord {
             path: "path/to/data/one".into(),
             last_modified: None,
-            etag: Some(reqwest::header::EntityTag::strong("one".into())),
+            etag: Some("one".into()),
         };
 
         let record_two = super::CacheRecord {
             path: "path/to/data/two".into(),
             last_modified: None,
-            etag: Some(reqwest::header::EntityTag::strong("two".into())),
+            etag: Some("two".into()),
         };
 
         let mut db =

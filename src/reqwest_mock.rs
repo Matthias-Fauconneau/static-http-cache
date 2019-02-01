@@ -17,7 +17,7 @@ where
     Self: ::std::marker::Sized,
 {
     /// Obtain access to the headers of the response.
-    fn headers(&self) -> &reqwest::header::Headers;
+    fn headers(&self) -> &reqwest::header::HeaderMap;
 
     /// Obtain a copy of the response's status.
     fn status(&self) -> reqwest::StatusCode;
@@ -27,7 +27,7 @@ where
 }
 
 impl HttpResponse for reqwest::Response {
-    fn headers(&self) -> &reqwest::header::Headers {
+    fn headers(&self) -> &reqwest::header::HeaderMap {
         self.headers()
     }
     fn status(&self) -> reqwest::StatusCode {
@@ -99,12 +99,12 @@ pub mod tests {
     #[derive(Clone, Debug)]
     pub struct FakeResponse {
         pub status: reqwest::StatusCode,
-        pub headers: reqwest::header::Headers,
+        pub headers: reqwest::header::HeaderMap,
         pub body: io::Cursor<Vec<u8>>,
     }
 
     impl super::HttpResponse for FakeResponse {
-        fn headers(&self) -> &reqwest::header::Headers {
+        fn headers(&self) -> &reqwest::header::HeaderMap {
             &self.headers
         }
         fn status(&self) -> reqwest::StatusCode {
@@ -128,7 +128,7 @@ pub mod tests {
 
     pub struct FakeClient {
         pub expected_url: reqwest::Url,
-        pub expected_headers: reqwest::header::Headers,
+        pub expected_headers: reqwest::header::HeaderMap,
         pub response: FakeResponse,
         called: cell::Cell<bool>,
     }
@@ -136,7 +136,7 @@ pub mod tests {
     impl FakeClient {
         pub fn new(
             expected_url: reqwest::Url,
-            expected_headers: reqwest::header::Headers,
+            expected_headers: reqwest::header::HeaderMap,
             response: FakeResponse,
         ) -> FakeClient {
             let called = cell::Cell::new(false);
@@ -160,7 +160,7 @@ pub mod tests {
             &self,
             request: reqwest::Request,
         ) -> Result<Self::Response, Box<Error>> {
-            assert_eq!(request.method(), &reqwest::Method::Get);
+            assert_eq!(request.method(), &reqwest::Method::GET);
             assert_eq!(request.url(), &self.expected_url);
             assert_eq!(request.headers(), &self.expected_headers);
 
@@ -175,7 +175,7 @@ pub mod tests {
         F: Fn() -> Box<Error>,
     {
         pub expected_url: reqwest::Url,
-        pub expected_headers: reqwest::header::Headers,
+        pub expected_headers: reqwest::header::HeaderMap,
         pub make_error: F,
         called: cell::Cell<bool>,
     }
@@ -186,7 +186,7 @@ pub mod tests {
     {
         pub fn new(
             expected_url: reqwest::Url,
-            expected_headers: reqwest::header::Headers,
+            expected_headers: reqwest::header::HeaderMap,
             make_error: F,
         ) -> BrokenClient<F> {
             let called = cell::Cell::new(false);
@@ -213,7 +213,7 @@ pub mod tests {
             &self,
             request: reqwest::Request,
         ) -> Result<Self::Response, Box<Error>> {
-            assert_eq!(request.method(), &reqwest::Method::Get);
+            assert_eq!(request.method(), &reqwest::Method::GET);
             assert_eq!(request.url(), &self.expected_url);
             assert_eq!(request.headers(), &self.expected_headers);
 

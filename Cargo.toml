@@ -12,7 +12,7 @@ categories = ["caching", "network-programming", "web-programming::http-client"]
 [dependencies]
 crypto-hash = "0.3.0"
 log = "0.4.1"
-reqwest = "0.8.4"
+reqwest = "0.9.9"
 sqlite = "0.23.9"
 rand = "0.4.2"
 
