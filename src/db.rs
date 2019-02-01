@@ -5,10 +5,8 @@ use std::fmt;
 use std::iter;
 use std::path;
 
-
 use reqwest;
 use sqlite;
-
 
 const SCHEMA_SQL: &str = "
     CREATE TABLE urls (
@@ -18,7 +16,6 @@ const SCHEMA_SQL: &str = "
     	etag TEXT
     );
 ";
-
 
 /// All the information we have about a given URL.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,16 +28,15 @@ pub struct CacheRecord {
     pub etag: Option<reqwest::header::EntityTag>,
 }
 
-
 /// Represents the rows returned by a query.
 struct Rows<'a>(sqlite::Cursor<'a>);
-
 
 impl<'a> iter::Iterator for Rows<'a> {
     type Item = Vec<sqlite::Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
+        self.0
+            .next()
             .unwrap_or_else(|err| {
                 warn!("Failed to get next row from SQLite: {}", err);
                 None
@@ -48,7 +44,6 @@ impl<'a> iter::Iterator for Rows<'a> {
             .map(|values| values.to_vec())
     }
 }
-
 
 /// Represents an attempt to record information in the database.
 #[must_use]
@@ -59,7 +54,10 @@ pub struct Transaction<'a> {
 
 impl<'a> Transaction<'a> {
     fn new(conn: &'a sqlite::Connection) -> Transaction<'a> {
-        Transaction{conn: conn, committed: false}
+        Transaction {
+            conn: conn,
+            committed: false,
+        }
     }
 
     pub fn commit(mut self) -> Result<(), Box<error::Error>> {
@@ -76,7 +74,7 @@ impl<'a> Transaction<'a> {
                 Err(new_err) => {
                     debug!("Failed to rollback too! {}", new_err);
                     err
-                },
+                }
             }
         })?;
         debug!("Commit successful!");
@@ -97,49 +95,46 @@ impl<'a> Drop for Transaction<'a> {
     }
 }
 
-fn canonicalize_db_path(path: path::PathBuf)
-    -> Result<path::PathBuf, Box<error::Error>>
-{
+fn canonicalize_db_path(
+    path: path::PathBuf,
+) -> Result<path::PathBuf, Box<error::Error>> {
     let mem_path: ffi::OsString = ":memory:".into();
 
-    Ok(
-        if path == mem_path {
-            // If it's the special ":memory:" path, use it as-is.
-            path.to_path_buf()
-        } else {
-            let parent = path.parent().unwrap_or(path::Path::new("."));
+    Ok(if path == mem_path {
+        // If it's the special ":memory:" path, use it as-is.
+        path.to_path_buf()
+    } else {
+        let parent = path.parent().unwrap_or(path::Path::new("."));
 
-            // Otherwise, canonicalize it so we can reliably compare instances.
-            // The weird joining behaviour is because we require the path
-            // to exist, but we don't require the filename to exist.
-            parent.canonicalize()?.join(path.file_name().unwrap_or(ffi::OsStr::new("")))
-        }
-    )
+        // Otherwise, canonicalize it so we can reliably compare instances.
+        // The weird joining behaviour is because we require the path
+        // to exist, but we don't require the filename to exist.
+        parent
+            .canonicalize()?
+            .join(path.file_name().unwrap_or(ffi::OsStr::new("")))
+    })
 }
 
 /// Represents the database that describes the contents of the cache.
-pub struct CacheDB{
+pub struct CacheDB {
     path: path::PathBuf,
     conn: sqlite::Connection,
 }
 
 impl CacheDB {
     /// Create a cache database in the given file.
-    pub fn new(path: path::PathBuf)
-        -> Result<CacheDB, Box<error::Error>>
-    {
+    pub fn new(path: path::PathBuf) -> Result<CacheDB, Box<error::Error>> {
         let path = canonicalize_db_path(path)?;
         debug!("Creating cache metadata in {:?}", path);
         let conn = sqlite::Connection::open(&path)?;
 
         // Package up the return value first, so we can use .query()
         // instead of wrangling sqlite directly.
-        let res = CacheDB{path, conn};
+        let res = CacheDB { path, conn };
 
-        let rows: Vec<_> = res.query(
-            "SELECT COUNT(*) FROM sqlite_master;",
-            &[],
-        )?.collect();
+        let rows: Vec<_> = res
+            .query("SELECT COUNT(*) FROM sqlite_master;", &[])?
+            .collect();
         if let sqlite::Value::Integer(0) = rows[0][0] {
             debug!("No tables in the cache DB, loading schema.");
             res.conn.execute(SCHEMA_SQL)?
@@ -153,7 +148,8 @@ impl CacheDB {
         query: T,
         params: &[sqlite::Value],
     ) -> sqlite::Result<Rows>
-    where T: ::std::fmt::Debug
+    where
+        T: ::std::fmt::Debug,
     {
         debug!("Executing query: {:?} with values {:?}", query, params);
 
@@ -164,14 +160,16 @@ impl CacheDB {
     }
 
     /// Return what the DB knows about a URL, if anything.
-    pub fn get(&self, mut url: reqwest::Url)
-        -> Result<CacheRecord, Box<error::Error>>
-    {
+    pub fn get(
+        &self,
+        mut url: reqwest::Url,
+    ) -> Result<CacheRecord, Box<error::Error>> {
         use std::str::FromStr;
 
         url.set_fragment(None);
 
-        let mut rows = self.query("
+        let mut rows = self.query(
+            "
             SELECT path, last_modified, etag
             FROM urls
             WHERE url = ?1
@@ -224,9 +222,11 @@ impl CacheDB {
     }
 
     /// Record information about this information in the database.
-    pub fn set(&mut self, mut url: reqwest::Url, record: CacheRecord)
-        -> Result<Transaction, Box<error::Error>>
-    {
+    pub fn set(
+        &mut self,
+        mut url: reqwest::Url,
+        record: CacheRecord,
+    ) -> Result<Transaction, Box<error::Error>> {
         url.set_fragment(None);
 
         // TODO: Consider using the "pre-poop-your-pants" pattern to
@@ -240,7 +240,8 @@ impl CacheDB {
         // the transaction when necessary.
         let res = Transaction::new(&self.conn);
 
-        let rows = self.query("
+        let rows = self.query(
+            "
             INSERT OR REPLACE INTO urls
                 (url, path, last_modified, etag)
             VALUES
@@ -249,26 +250,23 @@ impl CacheDB {
             &[
                 sqlite::Value::String(url.as_str().into()),
                 sqlite::Value::String(record.path),
-                record.last_modified
-                    .map(|date| {
-                        sqlite::Value::String(format!("{}", date))
-                    })
+                record
+                    .last_modified
+                    .map(|date| sqlite::Value::String(format!("{}", date)))
                     .unwrap_or(sqlite::Value::Null),
-                record.etag
-                    .map(|etag| {
-                        sqlite::Value::String(format!("{}", etag))
-                    })
+                record
+                    .etag
+                    .map(|etag| sqlite::Value::String(format!("{}", etag)))
                     .unwrap_or(sqlite::Value::Null),
             ],
         )?;
 
         // Exhaust the row iterator to ensure the query is executed.
-        for _ in rows {};
+        for _ in rows {}
 
         Ok(res)
     }
 }
-
 
 impl fmt::Debug for CacheDB {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -276,16 +274,13 @@ impl fmt::Debug for CacheDB {
     }
 }
 
-
 impl cmp::PartialEq for CacheDB {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
     }
 }
 
-
 impl cmp::Eq for CacheDB {}
-
 
 #[cfg(test)]
 mod tests {
@@ -297,15 +292,18 @@ mod tests {
 
     #[test]
     fn create_fresh_db() {
-        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
-        let rows: Vec<_> = db.query(
-            "SELECT name FROM sqlite_master WHERE TYPE = ?1",
-            &[sqlite::Value::String("table".into())],
-        ).unwrap().collect();
+        let rows: Vec<_> = db
+            .query(
+                "SELECT name FROM sqlite_master WHERE TYPE = ?1",
+                &[sqlite::Value::String("table".into())],
+            )
+            .unwrap()
+            .collect();
 
         assert_eq!(rows, vec![vec![sqlite::Value::String("urls".into())]]);
-
     }
 
     #[test]
@@ -314,31 +312,38 @@ mod tests {
         let db_path = root.join("cache.db");
 
         let db1 = super::CacheDB::new(db_path.clone()).unwrap();
-        let rows: Vec<_> = db1.query(
-            "SELECT name FROM sqlite_master WHERE TYPE = ?1",
-            &[sqlite::Value::String("table".into())],
-        ).unwrap().collect();
+        let rows: Vec<_> = db1
+            .query(
+                "SELECT name FROM sqlite_master WHERE TYPE = ?1",
+                &[sqlite::Value::String("table".into())],
+            )
+            .unwrap()
+            .collect();
         assert_eq!(rows, vec![vec![sqlite::Value::String("urls".into())]]);
 
-
         let db2 = super::CacheDB::new(db_path.clone()).unwrap();
-        let rows: Vec<_> = db2.query(
-            "SELECT name FROM sqlite_master WHERE TYPE = ?1",
-            &[sqlite::Value::String("table".into())],
-        ).unwrap().collect();
+        let rows: Vec<_> = db2
+            .query(
+                "SELECT name FROM sqlite_master WHERE TYPE = ?1",
+                &[sqlite::Value::String("table".into())],
+            )
+            .unwrap()
+            .collect();
         assert_eq!(rows, vec![vec![sqlite::Value::String("urls".into())]]);
     }
 
     #[test]
     fn open_bogus_db() {
-        let res = super::CacheDB::new(path::PathBuf::new().join("does/not/exist"));
+        let res =
+            super::CacheDB::new(path::PathBuf::new().join("does/not/exist"));
 
         assert_eq!(res.is_err(), true);
     }
 
     #[test]
     fn get_from_empty_db() {
-        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let err = db.get("http://example.com/".parse().unwrap()).unwrap_err();
 
@@ -350,7 +355,8 @@ mod tests {
 
     #[test]
     fn get_unknown_url() {
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         db.set(
             "http://example.com/one".parse().unwrap(),
@@ -359,11 +365,14 @@ mod tests {
                 last_modified: None,
                 etag: None,
             },
-        ).unwrap().commit().unwrap();
+        )
+        .unwrap()
+        .commit()
+        .unwrap();
 
-        let err = db.get(
-            "http://example.com/two".parse().unwrap()
-        ).unwrap_err();
+        let err = db
+            .get("http://example.com/two".parse().unwrap())
+            .unwrap_err();
 
         assert_eq!(
             err.description(),
@@ -373,7 +382,8 @@ mod tests {
 
     #[test]
     fn get_known_url() {
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
@@ -381,14 +391,13 @@ mod tests {
             etag: None,
         };
 
-        db.set(
-            "http://example.com/".parse().unwrap(),
-            orig_record.clone(),
-        ).unwrap().commit().unwrap();
+        db.set("http://example.com/".parse().unwrap(), orig_record.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
-        let new_record = db.get(
-            "http://example.com/".parse().unwrap()
-        ).unwrap();
+        let new_record =
+            db.get("http://example.com/".parse().unwrap()).unwrap();
 
         assert_eq!(new_record, orig_record);
     }
@@ -397,34 +406,39 @@ mod tests {
     fn get_known_url_with_headers() {
         use std::str::FromStr;
 
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
-            last_modified: Some(reqwest::header::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:00:00 GMT"
-            ).unwrap()),
+            last_modified: Some(
+                reqwest::header::HttpDate::from_str(
+                    "Thu, 01 Jan 1970 00:00:00 GMT",
+                )
+                .unwrap(),
+            ),
             etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
         };
 
-        db.set(
-            "http://example.com/".parse().unwrap(),
-            orig_record.clone(),
-        ).unwrap().commit().unwrap();
+        db.set("http://example.com/".parse().unwrap(), orig_record.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
-        let new_record = db.get(
-            "http://example.com/".parse().unwrap()
-        ).unwrap();
+        let new_record =
+            db.get("http://example.com/".parse().unwrap()).unwrap();
 
         assert_eq!(new_record, orig_record);
     }
 
     #[test]
     fn get_url_with_invalid_path() {
+        let db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
-        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
-
-        db.conn.execute("
+        db.conn
+            .execute(
+                "
             INSERT INTO urls
                 ( url
                 , path
@@ -438,7 +452,9 @@ mod tests {
                 , NULL
                 )
             ;
-        ").unwrap();
+        ",
+            )
+            .unwrap();
 
         let err = db.get("http://example.com/".parse().unwrap()).unwrap_err();
 
@@ -450,10 +466,12 @@ mod tests {
 
     #[test]
     fn get_url_with_invalid_last_modified_and_etag() {
+        let db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
-        let db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
-
-        db.conn.execute("
+        db.conn
+            .execute(
+                "
             INSERT INTO urls
                 ( url
                 , path
@@ -467,13 +485,15 @@ mod tests {
                 , CAST('def' AS BLOB)
                 )
             ;
-        ").unwrap();
+        ",
+            )
+            .unwrap();
 
         let record = db.get("http://example.com/".parse().unwrap()).unwrap();
 
         assert_eq!(
             record,
-            super::CacheRecord{
+            super::CacheRecord {
                 path: "path/to/data".into(),
                 // We expect TEXT or NULL; if we get a BLOB value we
                 // treat it as NULL.
@@ -485,7 +505,8 @@ mod tests {
 
     #[test]
     fn get_ignores_fragments() {
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         let orig_record = super::CacheRecord {
             path: "path/to/data".into(),
@@ -493,14 +514,13 @@ mod tests {
             etag: None,
         };
 
-        db.set(
-            "http://example.com/".parse().unwrap(),
-            orig_record.clone(),
-        ).unwrap().commit().unwrap();
+        db.set("http://example.com/".parse().unwrap(), orig_record.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
-        let new_record = db.get(
-            "http://example.com/#top".parse().unwrap()
-        ).unwrap();
+        let new_record =
+            db.get("http://example.com/#top".parse().unwrap()).unwrap();
 
         assert_eq!(new_record, orig_record);
     }
@@ -508,13 +528,14 @@ mod tests {
     #[test]
     fn insert_data_with_commit() {
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
-        let record = super::CacheRecord{
+        let record = super::CacheRecord {
             path: "path/to/data".into(),
             last_modified: None,
             etag: None,
         };
 
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Add data into the DB, inside a block so we can be sure all the
         //  intermediates have been dropped afterward.
@@ -524,10 +545,8 @@ mod tests {
             trans.commit().unwrap();
         }
 
-        let rows: Vec<_> = db.query(
-            "SELECT * FROM urls;",
-            &[],
-        ).unwrap().collect();
+        let rows: Vec<_> =
+            db.query("SELECT * FROM urls;", &[]).unwrap().collect();
         debug!("Table content: {:?}", rows);
 
         // Did our data make it into the DB?
@@ -539,19 +558,26 @@ mod tests {
         use std::str::FromStr;
 
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
-        let record = super::CacheRecord{
+        let record = super::CacheRecord {
             path: "path/to/data".into(),
-            last_modified: Some(reqwest::header::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:00:00 GMT"
-            ).unwrap()),
+            last_modified: Some(
+                reqwest::header::HttpDate::from_str(
+                    "Thu, 01 Jan 1970 00:00:00 GMT",
+                )
+                .unwrap(),
+            ),
             etag: Some(reqwest::header::EntityTag::strong("some-etag".into())),
         };
 
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Add data into the DB, inside a block so we can be sure all the
         //  intermediates have been dropped afterward.
-        db.set(url.clone(), record.clone()).unwrap().commit().unwrap();
+        db.set(url.clone(), record.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
         // Did our data make it into the DB?
         assert_eq!(db.get(url).unwrap(), record);
@@ -560,13 +586,14 @@ mod tests {
     #[test]
     fn insert_data_without_commit() {
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
-        let record = super::CacheRecord{
+        let record = super::CacheRecord {
             path: "path/to/data".into(),
             last_modified: None,
             etag: None,
         };
 
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Add data into the DB, inside a block so we can be sure all the
         //  intermediates have been dropped afterward.
@@ -587,66 +614,71 @@ mod tests {
     fn overwrite_data() {
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
 
-        let record_one = super::CacheRecord{
+        let record_one = super::CacheRecord {
             path: "path/to/data/one".into(),
             last_modified: None,
             etag: Some(reqwest::header::EntityTag::strong("one".into())),
         };
 
-        let record_two = super::CacheRecord{
+        let record_two = super::CacheRecord {
             path: "path/to/data/two".into(),
             last_modified: None,
             etag: Some(reqwest::header::EntityTag::strong("two".into())),
         };
 
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Our example URL just returned record one.
-        db.set(url.clone(), record_one.clone()).unwrap().commit().unwrap();
+        db.set(url.clone(), record_one.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
         // We recorded that correctly, right?
-        assert_eq!(
-            db.get(url.clone()).unwrap(),
-            record_one
-        );
+        assert_eq!(db.get(url.clone()).unwrap(), record_one);
 
         // Oh, the URL got updated!
-        db.set(url.clone(), record_two.clone()).unwrap().commit().unwrap();
+        db.set(url.clone(), record_two.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
         // We recorded that correctly too, right?
-        assert_eq!(
-            db.get(url.clone()).unwrap(),
-            record_two
-        );
+        assert_eq!(db.get(url.clone()).unwrap(), record_two);
     }
 
     #[test]
     fn insert_data_ignores_url_fragment() {
-        let record_one = super::CacheRecord{
+        let record_one = super::CacheRecord {
             path: "path/to/data/one".into(),
             last_modified: None,
             etag: Some(reqwest::header::EntityTag::strong("one".into())),
         };
 
-        let record_two = super::CacheRecord{
+        let record_two = super::CacheRecord {
             path: "path/to/data/two".into(),
             last_modified: None,
             etag: Some(reqwest::header::EntityTag::strong("two".into())),
         };
 
-        let mut db = super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
+        let mut db =
+            super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
         // Try to insert data with a fragment
         db.set(
             "http://example.com/#frag".parse().unwrap(),
             record_one.clone(),
-        ).unwrap().commit().unwrap();
+        )
+        .unwrap()
+        .commit()
+        .unwrap();
 
         // Try to insert different data without a fragment
-        db.set(
-            "http://example.com/".parse().unwrap(),
-            record_two.clone(),
-        ).unwrap().commit().unwrap();
+        db.set("http://example.com/".parse().unwrap(), record_two.clone())
+            .unwrap()
+            .commit()
+            .unwrap();
 
         // Querying with any fragment, or without a fragment, will always
         // give us the same information.
@@ -668,7 +700,10 @@ mod tests {
         db.set(
             "http://example.com/#boop".parse().unwrap(),
             record_one.clone(),
-        ).unwrap().commit().unwrap();
+        )
+        .unwrap()
+        .commit()
+        .unwrap();
 
         assert_eq!(
             db.get("http://example.com/#frag".parse().unwrap()).unwrap(),

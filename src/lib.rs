@@ -98,10 +98,9 @@
 extern crate crypto_hash;
 #[macro_use]
 extern crate log;
+extern crate rand;
 extern crate reqwest;
 extern crate sqlite;
-extern crate rand;
-
 
 use std::error;
 use std::fs;
@@ -110,16 +109,13 @@ use std::path;
 
 use reqwest::header as rh;
 
-
 pub mod reqwest_mock;
-
 
 mod db;
 
-
-fn make_random_file<P: AsRef<path::Path>>(parent: P)
-    -> Result<(fs::File, path::PathBuf), Box<error::Error>>
-{
+fn make_random_file<P: AsRef<path::Path>>(
+    parent: P,
+) -> Result<(fs::File, path::PathBuf), Box<error::Error>> {
     use rand::Rng;
     let mut rng = rand::thread_rng();
 
@@ -133,20 +129,19 @@ fn make_random_file<P: AsRef<path::Path>>(parent: P)
             .write(true)
             .open(&new_path)
         {
-            Ok(handle) => { return Ok((handle, new_path)) },
+            Ok(handle) => return Ok((handle, new_path)),
             Err(e) => {
                 if e.kind() != io::ErrorKind::AlreadyExists {
                     // An actual error, we'd better report it!
-                    return Err(e.into())
+                    return Err(e.into());
                 }
 
                 // Otherwise, we just picked a bad name. Let's go back
                 // around the loop and try again.
-            },
+            }
         };
     }
 }
-
 
 /// Represents a local cache of HTTP resources.
 ///
@@ -167,9 +162,7 @@ pub struct Cache<C: reqwest_mock::Client> {
     client: C,
 }
 
-
 impl<C: reqwest_mock::Client> Cache<C> {
-
     /// Returns a Cache that wraps `client` and caches data in `root`.
     ///
     /// If the directory `root` does not exist, it will be created.
@@ -216,27 +209,27 @@ impl<C: reqwest_mock::Client> Cache<C> {
     /// In all cases, it should be safe to blow away the entire directory
     /// and start from scratch.
     /// It's only cached data, after all.
-    pub fn new(root: path::PathBuf, client: C)
-        -> Result<Cache<C>, Box<error::Error>>
-    {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .create(&root)?;
+    pub fn new(
+        root: path::PathBuf,
+        client: C,
+    ) -> Result<Cache<C>, Box<error::Error>> {
+        fs::DirBuilder::new().recursive(true).create(&root)?;
 
         let db = db::CacheDB::new(root.join("cache.db"))?;
 
         Ok(Cache { root, db, client })
     }
 
-    fn record_response(&mut self, url: reqwest::Url, response: &C::Response)
-        -> Result<(fs::File, path::PathBuf, db::Transaction), Box<error::Error>>
+    fn record_response(
+        &mut self,
+        url: reqwest::Url,
+        response: &C::Response,
+    ) -> Result<(fs::File, path::PathBuf, db::Transaction), Box<error::Error>>
     {
         use reqwest_mock::HttpResponse;
 
         let content_dir = self.root.join("content");
-        fs::DirBuilder::new()
-            .recursive(true)
-            .create(&content_dir)?;
+        fs::DirBuilder::new().recursive(true).create(&content_dir)?;
 
         let (handle, path) = make_random_file(&content_dir)?;
         let trans = {
@@ -248,18 +241,17 @@ impl<C: reqwest_mock::Client> Cache<C> {
                     // We can be sure the relative path is valid UTF-8,
                     // because make_random_file() just generated it from ASCII.
                     path: rel_path.to_str().unwrap().into(),
-                    last_modified: response.headers()
+                    last_modified: response
+                        .headers()
                         .get::<rh::LastModified>()
-                        .map(|&rh::LastModified(date)| {
-                            date
-                        }),
-                    etag: response.headers()
-                        .get::<rh::ETag>()
-                        .map(|&rh::ETag(ref etag)| {
+                        .map(|&rh::LastModified(date)| date),
+                    etag: response.headers().get::<rh::ETag>().map(
+                        |&rh::ETag(ref etag)| {
                             // Because an etag may be of arbitrary size,
                             // it's not Copy.
                             etag.clone()
-                        }),
+                        },
+                    ),
                 },
             )?
         };
@@ -319,38 +311,40 @@ impl<C: reqwest_mock::Client> Cache<C> {
     /// the on-disk storage *should* be OK,
     /// so you might want to destroy this `Cache` instance
     /// and create a new one pointing at the same location.
-    pub fn get(&mut self, mut url: reqwest::Url)
-        -> Result<fs::File, Box<error::Error>>
-    {
-        use reqwest_mock::HttpResponse;
+    pub fn get(
+        &mut self,
+        mut url: reqwest::Url,
+    ) -> Result<fs::File, Box<error::Error>> {
         use reqwest::StatusCode;
+        use reqwest_mock::HttpResponse;
 
         url.set_fragment(None);
 
         let mut response = match self.db.get(url.clone()) {
-            Ok(db::CacheRecord{path: p, last_modified: lm, etag: et}) => {
+            Ok(db::CacheRecord {
+                path: p,
+                last_modified: lm,
+                etag: et,
+            }) => {
                 // We have a locally-cached copy, let's check whether the
                 // copy on the server has changed.
-                let mut request = reqwest::Request::new(
-                    reqwest::Method::Get,
-                    url.clone(),
-                );
+                let mut request =
+                    reqwest::Request::new(reqwest::Method::Get, url.clone());
                 if let Some(timestamp) = lm {
-                    request.headers_mut().set(
-                        rh::IfModifiedSince(timestamp),
-                    );
+                    request.headers_mut().set(rh::IfModifiedSince(timestamp));
                 }
                 if let Some(etag) = et {
-                    request.headers_mut().set(
-                        rh::IfNoneMatch::Items(vec![etag]),
-                    );
+                    request
+                        .headers_mut()
+                        .set(rh::IfNoneMatch::Items(vec![etag]));
                 }
 
                 info!("Sending HTTP request: {:?}", request);
 
-                let maybe_validation = self.client
+                let maybe_validation = self
+                    .client
                     .execute(request)
-                    .and_then(|resp| { resp.error_for_status() });
+                    .and_then(|resp| resp.error_for_status());
 
                 match maybe_validation {
                     Ok(new_response) => {
@@ -364,32 +358,30 @@ impl<C: reqwest_mock::Client> Cache<C> {
 
                         // Otherwise, we got a new response we need to cache.
                         new_response
-                    },
+                    }
                     Err(e) => {
                         warn!("Could not validate cached response: {}", e);
 
                         // Let's just use the existing data we have.
                         return Ok(fs::File::open(self.root.join(p))?);
-                    },
+                    }
                 }
-            },
+            }
             Err(_) => {
                 // This URL isn't in the cache, or we otherwise can't find it.
-                self.client.execute(
-                    reqwest::Request::new(reqwest::Method::Get, url.clone()),
-                )?.error_for_status()?
-            },
+                self.client
+                    .execute(reqwest::Request::new(
+                        reqwest::Method::Get,
+                        url.clone(),
+                    ))?
+                    .error_for_status()?
+            }
         };
 
-        let (mut handle, path, trans) = self.record_response(
-            url.clone(),
-            &response,
-        )?;
+        let (mut handle, path, trans) =
+            self.record_response(url.clone(), &response)?;
 
-        let count = io::copy(
-            &mut response,
-            &mut handle,
-        )?;
+        let count = io::copy(&mut response, &mut handle)?;
 
         debug!("Downloaded {} bytes", count);
 
@@ -398,7 +390,6 @@ impl<C: reqwest_mock::Client> Cache<C> {
         Ok(fs::File::open(&path)?)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -414,16 +405,17 @@ mod tests {
 
     use super::reqwest_mock::tests as rmt;
 
-
-    fn make_test_cache(client: rmt::FakeClient)
-        -> super::Cache<rmt::FakeClient>
-    {
+    fn make_test_cache(
+        client: rmt::FakeClient,
+    ) -> super::Cache<rmt::FakeClient> {
         super::Cache::new(
-            tempdir::TempDir::new("http-cache-test").unwrap().into_path(),
+            tempdir::TempDir::new("http-cache-test")
+                .unwrap()
+                .into_path(),
             client,
-        ).unwrap()
+        )
+        .unwrap()
     }
-
 
     #[test]
     fn initial_request_success() {
@@ -434,17 +426,15 @@ mod tests {
 
         let body = b"hello world";
 
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                url.clone(),
-                rh::Headers::default(),
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::Ok,
-                    headers: rh::Headers::default(),
-                    body: io::Cursor::new(body.as_ref().into()),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            url.clone(),
+            rh::Headers::default(),
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::Ok,
+                headers: rh::Headers::default(),
+                body: io::Cursor::new(body.as_ref().into()),
+            },
+        ));
 
         // We should get a file-handle containing the body bytes.
         let mut res = c.get(url).unwrap();
@@ -459,17 +449,15 @@ mod tests {
         let _ = env_logger::try_init();
 
         let url: reqwest::Url = "http://example.com/".parse().unwrap();
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                url.clone(),
-                rh::Headers::default(),
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::InternalServerError,
-                    headers: rh::Headers::default(),
-                    body: io::Cursor::new(vec![]),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            url.clone(),
+            rh::Headers::default(),
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::InternalServerError,
+                headers: rh::Headers::default(),
+                body: io::Cursor::new(vec![]),
+            },
+        ));
 
         let err = c.get(url).expect_err("Got a response??");
         assert_eq!(format!("{}", err), "FakeError");
@@ -480,25 +468,22 @@ mod tests {
     fn ignore_fragment_in_url() {
         let _ = env_logger::try_init();
 
-        let url_fragment: reqwest::Url = "http://example.com/#frag"
-            .parse()
-            .unwrap();
+        let url_fragment: reqwest::Url =
+            "http://example.com/#frag".parse().unwrap();
 
         let mut network_url = url_fragment.clone();
         network_url.set_fragment(None);
 
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                // We expect the cache to request the URL without the fragment.
-                network_url,
-                rh::Headers::default(),
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::Ok,
-                    headers: rh::Headers::default(),
-                    body: io::Cursor::new(b"hello world"[..].into()),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            // We expect the cache to request the URL without the fragment.
+            network_url,
+            rh::Headers::default(),
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::Ok,
+                headers: rh::Headers::default(),
+                body: io::Cursor::new(b"hello world"[..].into()),
+            },
+        ));
 
         // Ask for the URL with the fragment.
         c.get(url_fragment).unwrap();
@@ -518,17 +503,15 @@ mod tests {
         let mut response_headers = rh::Headers::default();
         response_headers.set(rh::LastModified(now.into()));
 
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                url.clone(),
-                rh::Headers::default(),
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::Ok,
-                    headers: response_headers.clone(),
-                    body: io::Cursor::new(body.as_ref().into()),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            url.clone(),
+            rh::Headers::default(),
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::Ok,
+                headers: response_headers.clone(),
+                body: io::Cursor::new(body.as_ref().into()),
+            },
+        ));
 
         // The response and its last-modified date should now be recorded
         // in the cache.
@@ -544,7 +527,7 @@ mod tests {
         c.client = rmt::FakeClient::new(
             url.clone(),
             second_request,
-            rmt::FakeResponse{
+            rmt::FakeResponse {
                 status: reqwest::StatusCode::NotModified,
                 headers: response_headers,
                 body: io::Cursor::new(b""[..].into()),
@@ -574,22 +557,18 @@ mod tests {
         let request_1_headers = rh::Headers::default();
         let mut response_1_headers = rh::Headers::default();
         response_1_headers.set(rh::LastModified(
-            rh::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:00:00 GMT"
-            ).unwrap(),
+            rh::HttpDate::from_str("Thu, 01 Jan 1970 00:00:00 GMT").unwrap(),
         ));
 
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                url.clone(),
-                request_1_headers,
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::Ok,
-                    headers: response_1_headers,
-                    body: io::Cursor::new(b"hello".as_ref().into()),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            url.clone(),
+            request_1_headers,
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::Ok,
+                headers: response_1_headers,
+                body: io::Cursor::new(b"hello".as_ref().into()),
+            },
+        ));
 
         // The response and its last-modified date should now be recorded
         // in the cache.
@@ -601,21 +580,17 @@ mod tests {
         // the "yes, it has been modified" response with a new Last-Modified.
         let mut request_2_headers = rh::Headers::default();
         request_2_headers.set(rh::IfModifiedSince(
-            rh::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:00:00 GMT"
-            ).unwrap(),
+            rh::HttpDate::from_str("Thu, 01 Jan 1970 00:00:00 GMT").unwrap(),
         ));
         let mut response_2_headers = rh::Headers::default();
         response_2_headers.set(rh::LastModified(
-            rh::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:01:00 GMT"
-            ).unwrap(),
+            rh::HttpDate::from_str("Thu, 01 Jan 1970 00:01:00 GMT").unwrap(),
         ));
 
         c.client = rmt::FakeClient::new(
             url.clone(),
             request_2_headers,
-            rmt::FakeResponse{
+            rmt::FakeResponse {
                 status: reqwest::StatusCode::Ok,
                 headers: response_2_headers,
                 body: io::Cursor::new(b"world".as_ref().into()),
@@ -635,16 +610,14 @@ mod tests {
         // the second response.
         let mut request_3_headers = rh::Headers::default();
         request_3_headers.set(rh::IfModifiedSince(
-            rh::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:01:00 GMT"
-            ).unwrap(),
+            rh::HttpDate::from_str("Thu, 01 Jan 1970 00:01:00 GMT").unwrap(),
         ));
         let response_3_headers = rh::Headers::default();
 
         c.client = rmt::FakeClient::new(
             url.clone(),
             request_3_headers,
-            rmt::FakeResponse{
+            rmt::FakeResponse {
                 status: reqwest::StatusCode::NotModified,
                 headers: response_3_headers,
                 body: io::Cursor::new(b"".as_ref().into()),
@@ -659,7 +632,6 @@ mod tests {
         assert_eq!(&buf, b"world");
         c.client.assert_called();
     }
-
 
     #[test]
     fn return_existing_data_on_connection_refused() {
@@ -678,9 +650,7 @@ mod tests {
         let request_1_headers = rh::Headers::default();
         let mut response_1_headers = rh::Headers::default();
         response_1_headers.set(rh::LastModified(
-            rh::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:00:00 GMT"
-            ).unwrap(),
+            rh::HttpDate::from_str("Thu, 01 Jan 1970 00:00:00 GMT").unwrap(),
         ));
 
         let mut c = super::Cache::new(
@@ -688,13 +658,14 @@ mod tests {
             rmt::FakeClient::new(
                 url.clone(),
                 request_1_headers,
-                rmt::FakeResponse{
+                rmt::FakeResponse {
                     status: reqwest::StatusCode::Ok,
                     headers: response_1_headers,
                     body: io::Cursor::new(b"hello".as_ref().into()),
-                }
+                },
             ),
-        ).unwrap();
+        )
+        .unwrap();
 
         // The response and its last-modified date should now be recorded
         // in the cache.
@@ -705,20 +676,17 @@ mod tests {
         // to match the first response's Last-Modified.
         let mut request_2_headers = rh::Headers::default();
         request_2_headers.set(rh::IfModifiedSince(
-            rh::HttpDate::from_str(
-                "Thu, 01 Jan 1970 00:00:00 GMT"
-            ).unwrap(),
+            rh::HttpDate::from_str("Thu, 01 Jan 1970 00:00:00 GMT").unwrap(),
         ));
 
         // This time, however, the request will return an error.
         let mut c = super::Cache::new(
             temp_path.clone(),
-            rmt::BrokenClient::new(
-                url.clone(),
-                request_2_headers,
-                || { rmt::FakeError.into() },
-            ),
-        ).unwrap();
+            rmt::BrokenClient::new(url.clone(), request_2_headers, || {
+                rmt::FakeError.into()
+            }),
+        )
+        .unwrap();
 
         // Now when we request a URL, we should get the cached result.
         let mut res = c.get(url.clone()).unwrap();
@@ -738,23 +706,17 @@ mod tests {
         // We send a request, and the server responds with the data,
         // and an "Etag" header.
         let mut response_headers = rh::Headers::default();
-        response_headers.set(
-            rh::ETag(
-                rh::EntityTag::strong("abcd".into()),
-            ),
-        );
+        response_headers.set(rh::ETag(rh::EntityTag::strong("abcd".into())));
 
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                url.clone(),
-                rh::Headers::default(),
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::Ok,
-                    headers: response_headers.clone(),
-                    body: io::Cursor::new(body.as_ref().into()),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            url.clone(),
+            rh::Headers::default(),
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::Ok,
+                headers: response_headers.clone(),
+                body: io::Cursor::new(body.as_ref().into()),
+            },
+        ));
 
         // The response and its etag should now be recorded
         // in the cache.
@@ -765,18 +727,14 @@ mod tests {
         // etag in the "if none match" header, and we'll give
         // the "no, it hasn't been modified" response.
         let mut second_request = rh::Headers::default();
-        second_request.set(
-            rh::IfNoneMatch::Items(
-                vec![
-                    rh::EntityTag::strong("abcd".into()),
-                ],
-            ),
-        );
+        second_request.set(rh::IfNoneMatch::Items(vec![
+            rh::EntityTag::strong("abcd".into()),
+        ]));
 
         c.client = rmt::FakeClient::new(
             url.clone(),
             second_request,
-            rmt::FakeResponse{
+            rmt::FakeResponse {
                 status: reqwest::StatusCode::NotModified,
                 headers: response_headers,
                 body: io::Cursor::new(b""[..].into()),
@@ -803,23 +761,17 @@ mod tests {
         // and an "ETag" header.
         let request_1_headers = rh::Headers::default();
         let mut response_1_headers = rh::Headers::default();
-        response_1_headers.set(
-            rh::ETag(
-                rh::EntityTag::strong("abcd".into()),
-            ),
-        );
+        response_1_headers.set(rh::ETag(rh::EntityTag::strong("abcd".into())));
 
-        let mut c = make_test_cache(
-            rmt::FakeClient::new(
-                url.clone(),
-                request_1_headers,
-                rmt::FakeResponse{
-                    status: reqwest::StatusCode::Ok,
-                    headers: response_1_headers,
-                    body: io::Cursor::new(b"hello".as_ref().into()),
-                }
-            ),
-        );
+        let mut c = make_test_cache(rmt::FakeClient::new(
+            url.clone(),
+            request_1_headers,
+            rmt::FakeResponse {
+                status: reqwest::StatusCode::Ok,
+                headers: response_1_headers,
+                body: io::Cursor::new(b"hello".as_ref().into()),
+            },
+        ));
 
         // The response and its etag should now be recorded in the cache.
         c.get(url.clone()).unwrap();
@@ -829,24 +781,16 @@ mod tests {
         // etag in the "if none match" header, and we'll give
         // the "yes, it has been modified" response with a new etag.
         let mut request_2_headers = rh::Headers::default();
-        request_2_headers.set(
-            rh::IfNoneMatch::Items(
-                vec![
-                    rh::EntityTag::strong("abcd".into()),
-                ],
-            ),
-        );
+        request_2_headers.set(rh::IfNoneMatch::Items(vec![
+            rh::EntityTag::strong("abcd".into()),
+        ]));
         let mut response_2_headers = rh::Headers::default();
-        response_2_headers.set(
-            rh::ETag(
-                rh::EntityTag::strong("efgh".into()),
-            ),
-        );
+        response_2_headers.set(rh::ETag(rh::EntityTag::strong("efgh".into())));
 
         c.client = rmt::FakeClient::new(
             url.clone(),
             request_2_headers,
-            rmt::FakeResponse{
+            rmt::FakeResponse {
                 status: reqwest::StatusCode::Ok,
                 headers: response_2_headers,
                 body: io::Cursor::new(b"world".as_ref().into()),
@@ -865,19 +809,15 @@ mod tests {
         // to match the second response, and be able to return the data from
         // the second response.
         let mut request_3_headers = rh::Headers::default();
-        request_3_headers.set(
-            rh::IfNoneMatch::Items(
-                vec![
-                    rh::EntityTag::strong("efgh".into()),
-                ],
-            ),
-        );
+        request_3_headers.set(rh::IfNoneMatch::Items(vec![
+            rh::EntityTag::strong("efgh".into()),
+        ]));
         let response_3_headers = rh::Headers::default();
 
         c.client = rmt::FakeClient::new(
             url.clone(),
             request_3_headers,
-            rmt::FakeResponse{
+            rmt::FakeResponse {
                 status: reqwest::StatusCode::NotModified,
                 headers: response_3_headers,
                 body: io::Cursor::new(b"".as_ref().into()),
@@ -892,7 +832,6 @@ mod tests {
         assert_eq!(&buf, b"world");
         c.client.assert_called();
     }
-
 
     // See also: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching
 }
