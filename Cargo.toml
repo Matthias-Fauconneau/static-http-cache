@@ -1,6 +1,6 @@
 [package]
 name = "static-http-cache"
-version = "0.1.0" # remember to update html_root_url
+version = "0.2.0" # remember to update html_root_url
 authors = ["Tim Allen <screwtape@froup.com>"]
 description = "A local cache for static HTTP resources"
 license = "MIT"
