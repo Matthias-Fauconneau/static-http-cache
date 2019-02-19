@@ -729,7 +729,10 @@ mod tests {
 
         assert_eq!(
             format!("my db: {:?}", db),
-            format!("my db: CacheDB {{path: {:?}}}", path)
+            format!(
+                "my db: CacheDB {{path: {:?}}}",
+                path.canonicalize().unwrap()
+            )
         );
     }
 }
