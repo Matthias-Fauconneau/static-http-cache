@@ -1,12 +1,4 @@
-use std::cmp;
-use std::error;
-use std::ffi;
-use std::fmt;
-use std::iter;
-use std::path;
-
-use reqwest;
-use sqlite;
+use {fehler::throws, anyhow::Error, std::{cmp, error, ffi, fmt, iter, path}, log::{warn, debug}, sqlite, reqwest};
 
 const SCHEMA_SQL: &str = "
     CREATE TABLE urls (
@@ -48,14 +40,14 @@ impl<'a> iter::Iterator for Rows<'a> {
 /// Represents an attempt to record information in the database.
 #[must_use]
 pub struct Transaction<'a> {
-    conn: &'a sqlite::Connection,
+    connection: &'a sqlite::Connection,
     committed: bool,
 }
 
 impl<'a> Transaction<'a> {
-    fn new(conn: &'a sqlite::Connection) -> Transaction<'a> {
+    fn new(connection: &'a sqlite::Connection) -> Transaction<'a> {
         Transaction {
-            conn: conn,
+            connection: connection,
             committed: false,
         }
     }
@@ -64,9 +56,9 @@ impl<'a> Transaction<'a> {
         debug!("Attempting to commit changes...");
         self.committed = true;
 
-        self.conn.execute("COMMIT;").map_err(|err| {
+        self.connection.execute("COMMIT;").map_err(|err| {
             debug!("Failed to commit changes: {}", err);
-            match self.conn.execute("ROLLBACK;") {
+            match self.connection.execute("ROLLBACK;") {
                 // Rollback worked, return the original error
                 Ok(_) => err,
                 // Rollback failed too! Let's warn about that,
@@ -88,19 +80,17 @@ impl<'a> Drop for Transaction<'a> {
             debug!("Changes already committed, nothing to do.")
         } else {
             debug!("Attempting to rollback changes...");
-            self.conn.execute("ROLLBACK;").unwrap_or_else(|err| {
+            self.connection.execute("ROLLBACK;").unwrap_or_else(|err| {
                 debug!("Failed to rollback changes: {}", err)
             })
         }
     }
 }
 
-fn canonicalize_db_path(
-    path: path::PathBuf,
-) -> Result<path::PathBuf, Box<dyn error::Error>> {
+#[throws] fn canonicalize_db_path(path: path::PathBuf) -> path::PathBuf {
     let mem_path: ffi::OsString = ":memory:".into();
 
-    Ok(if path == mem_path {
+    if path == mem_path {
         // If it's the special ":memory:" path, use it as-is.
         path.to_path_buf()
     } else {
@@ -112,50 +102,34 @@ fn canonicalize_db_path(
         parent
             .canonicalize()?
             .join(path.file_name().unwrap_or(ffi::OsStr::new("")))
-    })
+    }
 }
 
 /// Represents the database that describes the contents of the cache.
 pub struct CacheDB {
     path: path::PathBuf,
-    conn: sqlite::Connection,
+    connection: sqlite::Connection,
 }
 
 impl CacheDB {
     /// Create a cache database in the given file.
-    pub fn new(path: path::PathBuf) -> Result<CacheDB, Box<dyn error::Error>> {
+    #[throws] pub fn new(path: path::PathBuf) -> Self {
         let path = canonicalize_db_path(path)?;
         debug!("Creating cache metadata in {:?}", path);
-        let conn = sqlite::Connection::open(&path)?;
-
-        // Package up the return value first, so we can use .query()
-        // instead of wrangling sqlite directly.
-        let res = CacheDB { path, conn };
-
-        let rows: Vec<_> = res
-            .query("SELECT COUNT(*) FROM sqlite_master;", &[])?
-            .collect();
+        let connection = sqlite::Connection::open(&path)?;
+        let db = CacheDB { path, connection };
+        let rows: Vec<_> = db.query("SELECT COUNT(*) FROM sqlite_master;", &[])?.collect();
         if let sqlite::Value::Integer(0) = rows[0][0] {
             debug!("No tables in the cache DB, loading schema.");
-            res.conn.execute(SCHEMA_SQL)?
+            db.connection.execute(SCHEMA_SQL)?
         }
-
-        Ok(res)
+        db
     }
 
-    fn query<'a, T: AsRef<str>>(
-        &'a self,
-        query: T,
-        params: &[sqlite::Value],
-    ) -> sqlite::Result<Rows>
-    where
-        T: ::std::fmt::Debug,
-    {
+    fn query<'a, T: AsRef<str>+std::fmt::Debug>(&'a self, query: T, params: &[sqlite::Value]) -> sqlite::Result<Rows> {
         debug!("Executing query: {:?} with values {:?}", query, params);
-
-        let mut cur = self.conn.prepare(query)?.cursor();
+        let mut cur = self.connection.prepare(query)?.cursor();
         cur.bind(params)?;
-
         Ok(Rows(cur))
     }
 
@@ -228,11 +202,11 @@ impl CacheDB {
         // mem::forget() on the Transaction object.
 
         // Start a new transaction...
-        self.conn.execute("BEGIN;")?;
+        self.connection.execute("BEGIN;")?;
 
         // ...and immediately construct the value that will clean up
         // the transaction when necessary.
-        let res = Transaction::new(&self.conn);
+        let res = Transaction::new(&self.connection);
 
         let rows = self.query(
             "
@@ -423,7 +397,7 @@ mod tests {
         let db =
             super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
-        db.conn
+        db.connection
             .execute(
                 "
             INSERT INTO urls
@@ -456,7 +430,7 @@ mod tests {
         let db =
             super::CacheDB::new(path::PathBuf::new().join(":memory:")).unwrap();
 
-        db.conn
+        db.connection
             .execute(
                 "
             INSERT INTO urls
