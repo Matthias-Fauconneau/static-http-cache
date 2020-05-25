@@ -60,7 +60,7 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn commit(mut self) -> Result<(), Box<error::Error>> {
+    pub fn commit(mut self) -> Result<(), sqlite::Error> {
         debug!("Attempting to commit changes...");
         self.committed = true;
 
@@ -97,7 +97,7 @@ impl<'a> Drop for Transaction<'a> {
 
 fn canonicalize_db_path(
     path: path::PathBuf,
-) -> Result<path::PathBuf, Box<error::Error>> {
+) -> Result<path::PathBuf, Box<dyn error::Error>> {
     let mem_path: ffi::OsString = ":memory:".into();
 
     Ok(if path == mem_path {
@@ -123,7 +123,7 @@ pub struct CacheDB {
 
 impl CacheDB {
     /// Create a cache database in the given file.
-    pub fn new(path: path::PathBuf) -> Result<CacheDB, Box<error::Error>> {
+    pub fn new(path: path::PathBuf) -> Result<CacheDB, Box<dyn error::Error>> {
         let path = canonicalize_db_path(path)?;
         debug!("Creating cache metadata in {:?}", path);
         let conn = sqlite::Connection::open(&path)?;
@@ -163,7 +163,7 @@ impl CacheDB {
     pub fn get(
         &self,
         mut url: reqwest::Url,
-    ) -> Result<CacheRecord, Box<error::Error>> {
+    ) -> Result<CacheRecord, Box<dyn error::Error>> {
         url.set_fragment(None);
 
         let mut rows = self.query(
@@ -180,7 +180,7 @@ impl CacheDB {
                 Err(format!("URL not found in cache: {:?}", url)),
                 |x| Ok(x),
             )
-            .map(|row| -> Result<CacheRecord, Box<error::Error>> {
+            .map(|row| -> Result<CacheRecord, Box<dyn error::Error>> {
                 let mut cols = row.into_iter();
 
                 let path = match cols.next().unwrap() {
@@ -220,7 +220,7 @@ impl CacheDB {
         &mut self,
         mut url: reqwest::Url,
         record: CacheRecord,
-    ) -> Result<Transaction, Box<error::Error>> {
+    ) -> Result<Transaction, sqlite::Error> {
         url.set_fragment(None);
 
         // TODO: Consider using the "pre-poop-your-pants" pattern to

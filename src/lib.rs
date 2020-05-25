@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/static_http_cache/0.2.0")]
+#![doc(html_root_url = "https://docs.rs/static_http_cache/0.3.0")]
 //! Introduction
 //! ============
 //!
@@ -115,14 +115,14 @@ mod db;
 
 fn make_random_file<P: AsRef<path::Path>>(
     parent: P,
-) -> Result<(fs::File, path::PathBuf), Box<error::Error>> {
-    use rand::Rng;
+) -> std::io::Result<(fs::File, path::PathBuf)> {
     let mut rng = rand::thread_rng();
 
     loop {
+        use rand::Rng/*sample*/;
         let new_path = parent
             .as_ref()
-            .join(rng.gen_ascii_chars().take(20).collect::<String>());
+            .join(std::iter::repeat_with(|| rng.sample(rand::distributions::Alphanumeric)).take(20).collect::<String>());
 
         match fs::OpenOptions::new()
             .create_new(true)
@@ -133,7 +133,7 @@ fn make_random_file<P: AsRef<path::Path>>(
             Err(e) => {
                 if e.kind() != io::ErrorKind::AlreadyExists {
                     // An actual error, we'd better report it!
-                    return Err(e.into());
+                    return Err(e);
                 }
 
                 // Otherwise, we just picked a bad name. Let's go back
@@ -225,7 +225,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
     pub fn new(
         root: path::PathBuf,
         client: C,
-    ) -> Result<Cache<C>, Box<error::Error>> {
+    ) -> Result<Cache<C>, Box<dyn error::Error>> {
         fs::DirBuilder::new().recursive(true).create(&root)?;
 
         let db = db::CacheDB::new(root.join("cache.db"))?;
@@ -236,10 +236,10 @@ impl<C: reqwest_mock::Client> Cache<C> {
     fn record_response(
         &mut self,
         url: reqwest::Url,
-        response: &C::Response,
-    ) -> Result<(fs::File, path::PathBuf, db::Transaction), Box<error::Error>>
+        response: &impl reqwest_mock::HttpResponse,
+    ) -> Result<(fs::File, path::PathBuf, db::Transaction), anyhow::Error>
     {
-        use reqwest_mock::HttpResponse;
+        //use reqwest_mock::HttpResponse;
 
         let content_dir = self.root.join("content");
         fs::DirBuilder::new().recursive(true).create(&content_dir)?;
@@ -323,7 +323,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
     pub fn get(
         &mut self,
         mut url: reqwest::Url,
-    ) -> Result<fs::File, Box<error::Error>> {
+    ) -> Result<fs::File, anyhow::Error> {
         use reqwest::StatusCode;
         use reqwest_mock::HttpResponse;
 
@@ -338,7 +338,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
                 // We have a locally-cached copy, let's check whether the
                 // copy on the server has changed.
                 let mut request =
-                    reqwest::Request::new(reqwest::Method::GET, url.clone());
+                    reqwest::blocking::Request::new(reqwest::Method::GET, url.clone());
                 if let Some(timestamp) = lm {
                     request.headers_mut().append(
                         rh::IF_MODIFIED_SINCE,
@@ -383,7 +383,7 @@ impl<C: reqwest_mock::Client> Cache<C> {
             Err(_) => {
                 // This URL isn't in the cache, or we otherwise can't find it.
                 self.client
-                    .execute(reqwest::Request::new(
+                    .execute(reqwest::blocking::Request::new(
                         reqwest::Method::GET,
                         url.clone(),
                     ))?
